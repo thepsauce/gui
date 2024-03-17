@@ -1,0 +1,18 @@
+Button:
+	.background = color 0x60609f
+	.away = color 0xff0000
+	.shadow = color 0xff0000
+	.outline = color 0x5b1200
+	.text = color 0x00ff00
+	.press = color black
+	.hover = color black
+	.circular = bool true
+	.font = font default
+	.func = function int x, int y {
+		trigger happy
+		set a = bool true
+		event keydown A
+	}
+	.a = int 33
+	.b = int 44
+	.c = sum(a, b)
