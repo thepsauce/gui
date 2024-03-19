@@ -25,7 +25,12 @@ void function_Print(const Function *function, FILE *fp)
 	if (function->numParams > 0) {
 		fputc(' ', fp);
 	}
-	fprintf(fp, "{ %u }", function->numInstructions);
+	fputc('{', fp);
+	for (Uint32 i = 0; i < function->numInstructions; i++) {
+		fprintf(fp, " %u", function->instructions[i].instr);
+	}
+	fputc(' ', fp);
+	fputc('}', fp);
 }
 
 void property_Print(const Property *property, FILE *fp)

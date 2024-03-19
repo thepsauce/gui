@@ -6,15 +6,30 @@ struct context {
 	Label *labels;
 	Uint32 num, cur;
 	bool *evaluated;
+	Property *stack;
+	Uint32 numStack;
 };
 
 static int EvaluateProperty(struct context *ctx, Uint32 index);
+static int ExecuteSystem(struct context *ctx, const char *call,
+		Instruction *args, Uint32 numArgs, Property *result);
+static int ExecuteFunction(struct context *ctx, Function *func,
+		Instruction *args, Uint32 numArgs, Property *result);
+static int ExecuteInstructions(struct context *ctx, Instruction *instrs,
+		Uint32 num, Property *prop);
 
 static Property *SearchVariable(struct context *ctx, const char *name)
 {
 	Uint32 index;
 	Label *label;
 	RawWrapper *wrapper;
+
+	for (Uint32 i = ctx->numStack; i > 0; ) {
+		i--;
+		if (strcmp(ctx->stack[i].name, name) == 0) {
+			return &ctx->stack[i];
+		}
+	}
 
 	wrapper = &ctx->wrappers[ctx->cur];
 	for (index = 0; index < wrapper->numProperties; index++) {
@@ -34,49 +49,14 @@ static Property *SearchVariable(struct context *ctx, const char *name)
 	return &label->properties[index];
 }
 
-static int ExecuteSystem(struct context *ctx, const char *call,
-		Instruction *args, Uint32 numArgs, Property *result)
+static int EvaluateInstruction(struct context *ctx, Instruction *instr, Property *prop)
 {
-	(void) ctx;
-	printf("Exec system: %s[%p (%u)]\n", call, args, numArgs);
-	/* TODO: */
-	result->type = TYPE_INTEGER;
-	return 0;
-}
+	Property *var;
 
-static int ExecuteFunction(struct context *ctx, Function *func,
-		Instruction *args, Uint32 numArgs, Property *result)
-{
-	(void) ctx;
-	printf("Exec function: %p[%p (%u)]\n", func, args, numArgs);
-	/* TODO: */
-	result->type = TYPE_INTEGER;
-	return 0;
-}
-
-static int EvaluateProperty(struct context *ctx, Uint32 index)
-{
-	RawWrapper *wrapper;
-	RawProperty *raw;
-	Label *label;
-	Instruction *instr;
-	Property *prop, *var;
-
-	if (ctx->evaluated[index]) {
-		return 1;
-	}
-
-	wrapper = &ctx->wrappers[ctx->cur];
-	raw = &wrapper->properties[index];
-
-	label = &ctx->labels[ctx->cur];
-
-	prop = &label->properties[index];
-	prop->type = TYPE_NULL;
-
-	instr = &raw->instruction;
 	switch (instr->instr) {
 	case INSTR_EVENT:
+	case INSTR_IF:
+	case INSTR_RETURN:
 	case INSTR_SET:
 	case INSTR_TRIGGER:
 		return -1;
@@ -99,12 +79,278 @@ static int EvaluateProperty(struct context *ctx, Uint32 index)
 		prop->value = instr->value.value;
 		break;
 	case INSTR_VARIABLE:
+		printf("searching for: %s\n", instr->variable.name);
 		var = SearchVariable(ctx, instr->variable.name);
 		if (var == NULL) {
 			return -1;
 		}
 		*prop = *var;
 		break;
+	}
+	return 0;
+}
+
+static int ExecuteInstruction(struct context *ctx, Instruction *instr, Property *prop)
+{
+	Property *var;
+	bool b;
+
+	switch (instr->instr) {
+	case INSTR_EVENT:
+		printf("event: %u\n", instr->event.event);
+		break;
+	case INSTR_IF:
+		if (EvaluateInstruction(ctx, instr->iff.condition, prop) < 0) {
+			return -1;
+		}
+		if (prop->type == TYPE_INTEGER) {
+			b = !!prop->value.i;
+		} else if (prop->type == TYPE_BOOL) {
+			b = prop->value.b;
+		} else {
+			return -1;
+		}
+		if (b) {
+			return ExecuteInstructions(ctx, instr->iff.instructions,
+					instr->iff.numInstructions, prop);
+		}
+		break;
+	case INSTR_RETURN:
+		if (EvaluateInstruction(ctx, instr->ret.value, prop) < 0) {
+			return -1;
+		}
+		return 1;
+	case INSTR_SET:
+		var = SearchVariable(ctx, instr->set.variable);
+		if (var == NULL || var->type == TYPE_FUNCTION) {
+			return -1;
+		}
+		if (EvaluateInstruction(ctx, instr->set.value, prop) < 0) {
+			return -1;
+		}
+		if (prop->type != var->type) {
+			return -1;
+		}
+		var->value = prop->value;
+		break;
+	case INSTR_TRIGGER:
+		printf("triggering: %s\n", instr->trigger.name);
+		break;
+	case INSTR_INVOKE:
+		var = SearchVariable(ctx, instr->invoke.name);
+		if (var == NULL || var->type != TYPE_FUNCTION) {
+			if (ExecuteSystem(ctx, instr->invoke.name,
+					instr->invoke.args,
+					instr->invoke.numArgs, prop) < 0) {
+				return -1;
+			}
+		} else if (ExecuteFunction(ctx, var->value.func,
+					instr->invoke.args,
+					instr->invoke.numArgs, prop) < 0) {
+			return -1;
+		}
+		break;
+	case INSTR_VALUE:
+	case INSTR_VARIABLE:
+		break;
+	}
+	return 0;
+}
+
+static int ExecuteInstructions(struct context *ctx, Instruction *instrs,
+		Uint32 num, Property *prop)
+{
+	for (Uint32 i = 0; i < num; i++) {
+		const int r = ExecuteInstruction(ctx, &instrs[i], prop);
+		if (r != 0) {
+			return r;
+		}
+	}
+	return 0;
+}
+
+static int SystemEquals(Property *args, Uint32 numArgs, Property *result)
+{
+	result->type = TYPE_BOOL;
+	result->value.b = true;
+	for (Uint32 i = 0; i < numArgs; i++) {
+		for (Uint32 j = i + 1; j < numArgs; j++) {
+			if (args[i].type != args[j].type) {
+				result->value.b = false;
+				return 0;
+			}
+			switch (args[i].type) {
+			case TYPE_NULL:
+				return -1;
+			case TYPE_BOOL:
+				if (args[i].value.b != args[j].value.b) {
+					result->value.b = false;
+					return 0;
+				}
+				break;
+			case TYPE_INTEGER:
+				if (args[i].value.i != args[j].value.i) {
+					result->value.b = false;
+					return 0;
+				}
+				break;
+			case TYPE_COLOR:
+				if (args[i].value.color != args[j].value.color) {
+					result->value.b = false;
+					return 0;
+				}
+				break;
+			case TYPE_FLOAT:
+				if (args[i].value.f != args[j].value.f) {
+					result->value.b = false;
+					return 0;
+				}
+				break;
+			case TYPE_FONT:
+				if (args[i].value.font != args[j].value.font) {
+					result->value.b = false;
+					return 0;
+				}
+				break;
+			case TYPE_FUNCTION:
+				if (args[i].value.func != args[j].value.func) {
+					result->value.b = false;
+					return 0;
+				}
+				break;
+			}
+		}
+	}
+	return 0;
+}
+
+static int SystemSum(Property *args, Uint32 numArgs, Property *result)
+{
+	result->type = TYPE_INTEGER;
+	memset(&result->value, 0, sizeof(result->value));
+	for (Uint32 i = 0; i < numArgs; i++) {
+		if (args[i].type == TYPE_FLOAT) {
+			result->type = TYPE_FLOAT;
+			break;
+		}
+	}
+	for (Uint32 i = 0; i < numArgs; i++) {
+		if (args[i].type == TYPE_INTEGER) {
+			if (result->type == TYPE_FLOAT) {
+				result->value.f += args[i].value.i;
+			} else {
+				result->value.i += args[i].value.i;
+			}
+		} else if (args[i].type == TYPE_FLOAT) {
+			if (result->type == TYPE_FLOAT) {
+				result->value.f += args[i].value.f;
+			} else {
+				result->value.i += args[i].value.f;
+			}
+		} else {
+			return -1;
+		}
+	}
+	return 0;
+}
+
+static int ExecuteSystem(struct context *ctx, const char *call,
+		Instruction *args, Uint32 numArgs, Property *result)
+{
+	static const struct system_function {
+		const char *name;
+		int (*call)(Property *args, Uint32 numArgs, Property *result);
+	} functions[] = {
+		{ "equals", SystemEquals },
+		{ "sum", SystemSum },
+	};
+
+	const struct system_function *sys = NULL;
+
+	for (Uint32 i = 0; i < (Uint32) ARRLEN(functions); i++) {
+		if (strcmp(functions[i].name, call) == 0) {
+			sys = &functions[i];
+			break;
+		}
+	}
+	if (sys == NULL) {
+		return -1;
+	}
+
+	Property props[numArgs];
+	for (Uint32 i = 0; i < numArgs; i++) {
+		if (EvaluateInstruction(ctx, &args[i], &props[i]) < 0) {
+			return -1;
+		}
+	}
+	printf("Exec system: %s[%p (%u)]\n", call, args, numArgs);
+	const int r = sys->call(props, numArgs, result);
+	printf("ret=%d\n", r);
+	return r;
+}
+
+static int ExecuteFunction(struct context *ctx, Function *func,
+		Instruction *args, Uint32 numArgs, Property *result)
+{
+	Property *newStack;
+	Property prop;
+	int r;
+
+	if (func->numParams != numArgs) {
+		return -1;
+	}
+
+	newStack = union_Realloc(union_Default(), ctx->stack,
+			sizeof(*ctx->stack) * (ctx->numStack + numArgs));
+	if (newStack == NULL) {
+		return -1;
+	}
+	ctx->stack = newStack;
+
+	for (Uint32 i = 0; i < numArgs; i++) {
+		if (EvaluateInstruction(ctx, &args[i],
+					&ctx->stack[ctx->numStack]) < 0) {
+			return -1;
+		}
+		if (func->params[i].type != ctx->stack[ctx->numStack].type) {
+			return -1;
+		}
+		strcpy(ctx->stack[ctx->numStack].name, func->params[i].name);
+		ctx->numStack++;
+	}
+	r = ExecuteInstructions(ctx, func->instructions, func->numInstructions,
+			&prop);
+	if (r < 0) {
+		return -1;
+	}
+	if (r == 1) {
+		*result = prop;
+	}
+	ctx->numStack -= numArgs;
+	return 0;
+}
+
+static int EvaluateProperty(struct context *ctx, Uint32 index)
+{
+	RawWrapper *wrapper;
+	RawProperty *raw;
+	Label *label;
+	Property *prop;
+
+	if (ctx->evaluated[index]) {
+		return 1;
+	}
+
+	wrapper = &ctx->wrappers[ctx->cur];
+	raw = &wrapper->properties[index];
+
+	label = &ctx->labels[ctx->cur];
+
+	prop = &label->properties[index];
+	prop->type = TYPE_NULL;
+
+	if (EvaluateInstruction(ctx, &raw->instruction, prop) < 0) {
+		return -1;
 	}
 	if (prop->type == TYPE_NULL) {
 		return -1;
@@ -132,6 +378,7 @@ static int EvaluateNext(struct context *ctx)
 	}
 	memset(ctx->evaluated, 0, wrapper->numProperties);
 	for (Uint32 i = 0; i < wrapper->numProperties; i++) {
+		printf("property %u: %s\n", i, wrapper->properties[i].name);
 		if (EvaluateProperty(ctx, i) < 0) {
 			return -1;
 		}
@@ -148,6 +395,7 @@ int prop_Evaluate(Union *uni, RawWrapper *wrappers, Uint32 numWrappers,
 	struct context ctx;
 	Label *labels;
 
+	memset(&ctx, 0, sizeof(ctx));
 	ctx.uni = uni;
 	ctx.wrappers = wrappers;
 	ctx.labels = union_Alloc(uni, sizeof(*labels) * numWrappers);
@@ -158,6 +406,7 @@ int prop_Evaluate(Union *uni, RawWrapper *wrappers, Uint32 numWrappers,
 	for (Uint32 i = 0; i < numWrappers; i++) {
 		ctx.cur = i;
 		if (EvaluateNext(&ctx) < 0) {
+
 			return -1;
 		}
 	}

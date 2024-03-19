@@ -15,6 +15,8 @@ struct parser {
 	Value value;
 	RawProperty property;
 	Instruction instruction;
+	Instruction *instructions;
+	Uint32 numInstructions;
 };
 
 static int parser_NextChar(struct parser *parser)
@@ -255,6 +257,33 @@ static Sint64 parser_ReadColor(struct parser *parser)
 /* -=-=-=-=-=-=-=-=- Instruction -=-=-=-=-=-=-=-=- */
 static int parser_ReadInstruction(struct parser *parser);
 
+static int parser_ReadBody(struct parser *parser)
+{
+	Instruction *instructions = NULL, *newInstructions;
+	Uint32 numInstructions = 0;
+
+	if (parser->c != '{') {
+		return -1;
+	}
+	parser_NextChar(parser); /* skip '{' */
+	while (parser_SkipSpace(parser), parser->c != '}') {
+		if (parser_ReadInstruction(parser) < 0) {
+			return -1;
+		}
+		newInstructions = union_Realloc(union_Default(), instructions,
+				sizeof(*instructions) * (numInstructions + 1));
+		if (newInstructions == NULL) {
+			return -1;
+		}
+		instructions = newInstructions;
+		instructions[numInstructions++] = parser->instruction;
+	}
+	parser_NextChar(parser); /* skip '}' */
+	parser->instructions = instructions;
+	parser->numInstructions = numInstructions;
+	return 0;
+}
+
 static int parser_ReadKeyDown(struct parser *parser)
 {
 	struct key_info ki;
@@ -286,12 +315,93 @@ static int parser_ReadEvent(struct parser *parser)
 	parser_SkipSpace(parser);
 	for (size_t i = 0; i < ARRLEN(events); i++) {
 		if (strcmp(events[i].word, parser->word) == 0) {
+			parser->instruction.instr = INSTR_EVENT;
 			parser->instruction.event.event = events[i].event;
 			events[i].read(parser);
 			return 0;
 		}
 	}
 	return -1;
+}
+
+static int parser_ReadIf(struct parser *parser)
+{
+	Instruction *cond;
+
+	if (parser_ReadInstruction(parser) < 0) {
+		return -1;
+	}
+	cond = union_Alloc(union_Default(), sizeof(*cond));
+	if (cond == NULL) {
+		return -1;
+	}
+	*cond = parser->instruction;
+	parser_SkipSpace(parser);
+	if (parser_ReadBody(parser) < 0) {
+		return -1;
+	}
+	parser->instruction.instr = INSTR_IF;
+	parser->instruction.iff.condition = cond;
+	parser->instruction.iff.instructions = parser->instructions;
+	parser->instruction.iff.numInstructions = parser->numInstructions;
+	return 0;
+}
+
+static int parser_ReadInvoke(struct parser *parser)
+{
+	char name[256];
+	Instruction *args = NULL, *newArgs;
+	Uint32 numArgs = 0;
+
+	/* assuming that the caller got the invoke name already
+	 * and has skipped the '('
+	 */
+	strcpy(name, parser->word);
+	while (1) {
+		if (parser_ReadInstruction(parser) < 0) {
+			return -1;
+		}
+		/* NOT parser->uni! */
+		newArgs = union_Realloc(union_Default(), args,
+				sizeof(*args) * (numArgs + 1));
+		if (newArgs == NULL) {
+			return -1;
+		}
+		args = newArgs;
+		args[numArgs++] = parser->instruction;
+		parser_SkipSpace(parser);
+		if (parser->c != ',') {
+			break;
+		}
+		parser_NextChar(parser);
+		parser_SkipSpace(parser);
+	}
+	if (parser->c != ')') {
+		return -1;
+	}
+	parser_NextChar(parser); /* skip ')' */
+	strcpy(parser->instruction.invoke.name, name);
+	parser->instruction.instr = INSTR_INVOKE;
+	parser->instruction.invoke.args = args;
+	parser->instruction.invoke.numArgs = numArgs;
+	return 0;
+}
+
+static int parser_ReadReturn(struct parser *parser)
+{
+	Instruction *instr;
+
+	if (parser_ReadInstruction(parser) < 0) {
+		return -1;
+	}
+	instr = union_Alloc(union_Default(), sizeof(*instr));
+	if (instr == NULL) {
+		return -1;
+	}
+	*instr = parser->instruction;
+	parser->instruction.instr = INSTR_RETURN;
+	parser->instruction.ret.value = instr;
+	return 0;
 }
 
 static int parser_ReadSet(struct parser *parser)
@@ -309,16 +419,18 @@ static int parser_ReadSet(struct parser *parser)
 	parser_NextChar(parser); /* skip '=' */
 	parser_SkipSpace(parser);
 
+	/* save this because it will be overwritten */
+	const Instruction instr = parser->instruction;
+	if (parser_ReadInstruction(parser) < 0) {
+		return -1;
+	}
 	pInstr = union_Alloc(union_Default(), sizeof(*pInstr));
 	if (pInstr == NULL) {
 		return -1;
 	}
-	const Instruction instr = parser->instruction;
-	if (parser_ReadInstruction(parser) < 0) {
-		union_Free(union_Default(), pInstr);
-		return -1;
-	}
+	*pInstr = parser->instruction;
 	parser->instruction = instr;
+	parser->instruction.instr = INSTR_SET;
 	parser->instruction.set.value = pInstr;
 	return 0;
 }
@@ -328,6 +440,7 @@ static int parser_ReadTrigger(struct parser *parser)
 	if (parser_ReadWord(parser) < 0) {
 		return -1;
 	}
+	parser->instruction.instr = INSTR_TRIGGER;
 	strcpy(parser->instruction.trigger.name, parser->word);
 	return 0;
 }
@@ -384,46 +497,6 @@ static int parser_ReadValue(struct parser *parser, type_t type)
 	return 0;
 }
 
-static int parser_ReadInvoke(struct parser *parser)
-{
-	char name[256];
-	Instruction *args = NULL, *newArgs;
-	Uint32 numArgs = 0;
-
-	/* assuming that the caller got the invoke name already
-	 * and has skipped the '('
-	 */
-	strcpy(name, parser->word);
-	while (1) {
-		if (parser_ReadInstruction(parser) < 0) {
-			return -1;
-		}
-		/* NOT parser->uni! */
-		newArgs = union_Realloc(union_Default(), args,
-				sizeof(*args) * (numArgs + 1));
-		if (newArgs == NULL) {
-			return -1;
-		}
-		args = newArgs;
-		args[numArgs++] = parser->instruction;
-		parser_SkipSpace(parser);
-		if (parser->c != ',') {
-			break;
-		}
-		parser_NextChar(parser);
-		parser_SkipSpace(parser);
-	}
-	if (parser->c != ')') {
-		return -1;
-	}
-	parser_NextChar(parser); /* skip ')' */
-	strcpy(parser->instruction.invoke.name, name);
-	parser->instruction.instr = INSTR_INVOKE;
-	parser->instruction.invoke.args = args;
-	parser->instruction.invoke.numArgs = numArgs;
-	return 0;
-}
-
 static int parser_ReadInstruction(struct parser *parser)
 {
 	static const struct {
@@ -431,6 +504,8 @@ static int parser_ReadInstruction(struct parser *parser)
 		int (*read)(struct parser *parser);
 	} keywords[] = {
 		{ "event", parser_ReadEvent },
+		{ "if", parser_ReadIf },
+		{ "return", parser_ReadReturn },
 		{ "set", parser_ReadSet },
 		{ "trigger", parser_ReadTrigger },
 	};
@@ -472,8 +547,6 @@ static Function *parser_ReadFunction(struct parser *parser)
 	type_t type;
 	Parameter *params = NULL, *newParams;
 	Uint32 numParams = 0;
-	Instruction *instructions = NULL, *newInstructions;
-	Uint32 numInstructions = 0;
 
 	func = union_Alloc(union_Default(), sizeof(*func));
 	if (func == NULL) {
@@ -515,25 +588,13 @@ static Function *parser_ReadFunction(struct parser *parser)
 		}
 	}
 
-	/* read body */
-	parser_NextChar(parser); /* skip '{' */
-	while (parser_SkipSpace(parser), parser->c != '}') {
-		if (parser_ReadInstruction(parser) < 0) {
-			return NULL;
-		}
-		newInstructions = union_Realloc(union_Default(), instructions,
-				sizeof(*instructions) * (numInstructions + 1));
-		if (newInstructions == NULL) {
-			return NULL;
-		}
-		instructions = newInstructions;
-		instructions[numInstructions++] = parser->instruction;
+	if (parser_ReadBody(parser) < 0) {
+		return NULL;
 	}
-	parser_NextChar(parser); /* skip '}' */
 	func->params = params;
 	func->numParams = numParams;
-	func->instructions = instructions;
-	func->numInstructions = numInstructions;
+	func->instructions = parser->instructions;
+	func->numInstructions = parser->numInstructions;
 	return func;
 }
 
@@ -576,6 +637,7 @@ static int parser_ReadProperty(struct parser *parser)
 	parser->property.instruction = parser->instruction;
 	return 0;
 }
+
 static int wrapper_AddProperty(Union *uni, RawWrapper *wrapper,
 		const RawProperty *property)
 {

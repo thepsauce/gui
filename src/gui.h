@@ -180,7 +180,9 @@ typedef struct parameter {
 
 typedef enum {
 	INSTR_EVENT,
+	INSTR_IF,
 	INSTR_INVOKE,
+	INSTR_RETURN,
 	INSTR_SET,
 	INSTR_TRIGGER,
 	INSTR_VALUE,
@@ -210,10 +212,20 @@ struct instr_event {
 	EventInfo info;
 };
 
+struct instr_if {
+	struct instruction *condition;
+	struct instruction *instructions;
+	Uint32 numInstructions;
+};
+
 struct instr_invoke {
 	char name[256];
 	struct instruction *args;
 	Uint32 numArgs;
+};
+
+struct instr_return {
+	struct instruction *value;
 };
 
 struct instr_set {
@@ -238,9 +250,11 @@ typedef struct instruction {
 	instr_t instr;
 	union {
 		struct instr_event event;
+		struct instr_if iff;
 		struct instr_invoke invoke;
-		struct instr_trigger trigger;
+		struct instr_return ret;
 		struct instr_set set;
+		struct instr_trigger trigger;
 		struct instr_value value;
 		struct instr_variable variable;
 	};
