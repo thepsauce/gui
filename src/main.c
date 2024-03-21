@@ -16,7 +16,7 @@ int main(void)
 	View *cont, *view;
 
 	if (gui_Init(GUI_INIT_CLASSES) < 0) {
-		return 0;
+		return 1;
 	}
 
 	class_Create("Container", container_Proc);

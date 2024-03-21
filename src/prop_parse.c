@@ -66,6 +66,77 @@ static int parser_ReadWord(struct parser *parser)
 	return 0;
 }
 
+static int HexToInt(char ch)
+{
+	if (isdigit(ch)) {
+		return ch - '0';
+	}
+	if (isalpha(ch)) {
+		return ch >= 'a' ? ch - 'a' + 0xa : ch - 'A' + 0xA;
+	}
+	return -1;
+}
+
+static int parser_ReadString(struct parser *parser)
+{
+	struct string s;
+	char *newData;
+
+	s.data = NULL;
+	s.length = 0;
+
+	if (parser->c != '\"') {
+		return -1;
+	}
+	while (parser_NextChar(parser) != EOF) {
+		int c;
+
+		if (parser->c == '\"') {
+			parser_NextChar(parser); /* skip '"' */
+			break;
+		}
+		if (parser->c == '\\') {
+			parser_NextChar(parser);
+			switch (parser->c) {
+			case 'a': c = '\a'; break;
+			case 'b': c = '\b'; break;
+			case 'f': c = '\f'; break;
+			case 'n': c = '\n'; break;
+			case 'r': c = '\r'; break;
+			case 't': c = '\t'; break;
+			case 'v': c = '\b'; break;
+			case 'x': {
+				int d1, d2;
+
+				d1 = HexToInt(parser_NextChar(parser));
+				if (d1 < 0) {
+					return -1;
+				}
+				d2 = HexToInt(parser_NextChar(parser));
+				if (d2 < 0) {
+					return -1;
+				}
+				c = (d1 << 4) | d2;
+				break;
+			}
+			default:
+				  c = parser->c;
+			}
+		} else {
+			c = parser->c;
+		}
+		newData = union_Realloc(union_Default(), s.data, s.length + 1);
+		if (newData == NULL) {
+			return -1;
+		}
+		s.data = newData;
+		s.data[s.length++] = c;
+	}
+
+	parser->value.s = s;
+	return 0;
+}
+
 static type_t parser_CheckType(struct parser *parser)
 {
 	static const char *typeNames[] = {
@@ -74,7 +145,8 @@ static type_t parser_CheckType(struct parser *parser)
 		[TYPE_FLOAT] = "float",
 		[TYPE_FONT] = "font",
 		[TYPE_FUNCTION] = "function",
-		[TYPE_INTEGER] ="int"
+		[TYPE_INTEGER] = "int",
+		[TYPE_STRING] = "string"
 	};
 	if (parser->nWord == 0) {
 		return TYPE_NULL;
@@ -93,10 +165,12 @@ static int parser_ReadBool(struct parser *parser)
 		return -1;
 	}
 	if (strcmp(parser->word, "true") == 0) {
-		return true;
+		parser->value.b = true;
+		return 0;
 	}
 	if (strcmp(parser->word, "false") == 0) {
-		return false;
+		parser->value.b = false;
+		return 0;
 	}
 	return -1;
 }
@@ -107,30 +181,40 @@ static int parser_ReadFont(struct parser *parser)
 		return -1;
 	}
 	if (!strcmp(parser->word, "default")) {
+		parser->value.font = NULL;
 		return 0;
 	}
 	return -1;
 }
 
-static Sint64 parser_ReadInt(struct parser *parser)
+static int parser_ReadInt(struct parser *parser)
 {
+	Sint64 sign;
 	Sint64 num = 0;
+
+	if (parser->c == '+') {
+		sign = 1;
+		parser_NextChar(parser);
+	} else if (parser->c == '-') {
+		sign = -1;
+		parser_NextChar(parser);
+	} else {
+		sign = 1;
+	}
 
 	if (!isdigit(parser->c)) {
 		return -1;
 	}
+
 	if (parser->c == '0') {
 		int c;
 
 		c = tolower(parser_NextChar(parser));
 		if (c == 'x') {
-			while (c = parser_NextChar(parser), isxdigit(c)) {
+			while (c = parser_NextChar(parser),
+					(c = HexToInt(c)) >= 0) {
 				num <<= 4;
-				if (isdigit(c)) {
-					num += c - '0';
-				} else {
-					num += tolower(c) - ('a' - 0xa);
-				}
+				num += c;
 			}
 		} else if (c == 'o') {
 			while (c = parser_NextChar(parser), c >= '0' &&
@@ -151,19 +235,19 @@ static Sint64 parser_ReadInt(struct parser *parser)
 			num += parser->c - '0';
 		} while (parser_NextChar(parser), isdigit(parser->c));
 	}
-	return num;
+	parser->value.i = sign * num;
+	return 0;
 }
 
-static float parser_ReadFloat(struct parser *parser)
+static int parser_ReadFloat(struct parser *parser)
 {
 	Sint32 sign;
 	float front = 0, back = 0;
 	Sint32 nFront = 0, nBack = 0;
 	Sint32 signExponent = 0;
 	Sint32 exponent = 0;
-	float num;
 
-	if (parser->c == '-') {
+	if (parser->c == '+') {
 		sign = 1;
 		parser_NextChar(parser);
 	} else if (parser->c == '-') {
@@ -189,7 +273,7 @@ static float parser_ReadFloat(struct parser *parser)
 		}
 	}
 	if (nFront == 0 && nBack == 0) {
-		return 0.0f/0.0f;
+		return -1;
 	}
 
 	if (parser->c == 'e' || parser->c == 'E') {
@@ -204,9 +288,8 @@ static float parser_ReadFloat(struct parser *parser)
 			signExponent = 1;
 		}
 		while (isdigit(parser->c)) {
-			back *= 10;
-			back += parser->c - '0';
-			nBack++;
+			exponent *= 10;
+			exponent += parser->c - '0';
 			parser_NextChar(parser);
 		}
 	}
@@ -224,18 +307,32 @@ static float parser_ReadFloat(struct parser *parser)
 	for (Sint32 i = 0; i < exponent; i++) {
 		front *= 10;
 	}
-	num = front + back;
-	return sign * num;
+	parser->value.f = sign * (front + back);
+	return 0;
 }
 
-static Sint64 parser_ReadColor(struct parser *parser)
+static int parser_ReadColor(struct parser *parser)
 {
 	static const struct {
 		const char *name;
 		Uint32 color;
 	} colors[] = {
-		/* TODO: more colors */
-		{ "black", 0 }
+		{ "black", 0x000000 },
+		{ "white", 0xffffff },
+		{ "red", 0xff0000 },
+		{ "green", 0x00ff00 },
+		{ "blue", 0x0000ff },
+		{ "yellow", 0xffff00 },
+		{ "cyan", 0x00ffff },
+		{ "magenta", 0xff00ff },
+		{ "gray", 0x808080 },
+		{ "orange", 0xffa500 },
+		{ "purple", 0x800080 },
+		{ "brown", 0xa52a2a },
+		{ "pink", 0xffc0cb },
+		{ "olive", 0x808000 },
+		{ "teal", 0x008080 },
+		{ "navy", 0x000080 }
 	};
 
 	if (isdigit(parser->c)) {
@@ -247,7 +344,8 @@ static Sint64 parser_ReadColor(struct parser *parser)
 		}
 		for (size_t i = 0; i < ARRLEN(colors); i++) {
 			if (strcmp(colors[i].name, parser->word) == 0) {
-				return colors[i].color;
+				parser->value.color = colors[i].color;
+				return 0;
 			}
 		}
 	}
@@ -445,56 +543,23 @@ static int parser_ReadTrigger(struct parser *parser)
 	return 0;
 }
 
-static Function *parser_ReadFunction(struct parser *parser);
+static int parser_ReadFunction(struct parser *parser);
 
 static int parser_ReadValue(struct parser *parser, type_t type)
 {
-	switch (type) {
-	case TYPE_NULL:
+	static int (*const reads[])(struct parser *parser) = {
+		[TYPE_BOOL] = parser_ReadBool,
+		[TYPE_COLOR] = parser_ReadColor,
+		[TYPE_FLOAT] = parser_ReadFloat,
+		[TYPE_FONT] = parser_ReadFont,
+		[TYPE_FUNCTION] = parser_ReadFunction,
+		[TYPE_INTEGER] = parser_ReadInt,
+		[TYPE_STRING] = parser_ReadString,
+	};
+	if (type == TYPE_NULL) {
 		return -1;
-	case TYPE_BOOL: {
-		int b;
-
-		if ((b = parser_ReadBool(parser)) < 0) {
-			return -1;
-		}
-		parser->value.b = b;
-		break;
 	}
-	case TYPE_COLOR: {
-		Sint64 color;
-
-		if ((color = parser_ReadColor(parser)) < 0) {
-			return -1;
-		}
-		parser->value.color = color;
-		break;
-	 }
-	case TYPE_FLOAT:
-		if (isnanf(parser->value.f = parser_ReadFloat(parser))) {
-			return -1;
-		}
-		break;
-	case TYPE_FONT:
-		parser->value.font = NULL;
-		if (parser_ReadFont(parser) < 0) {
-			return -1;
-		}
-		/* TODO */
-		break;
-	case TYPE_FUNCTION:
-		if ((parser->value.func = parser_ReadFunction(parser)) ==
-				NULL) {
-			return -1;
-		}
-		break;
-	case TYPE_INTEGER:
-		if ((parser->value.i = parser_ReadInt(parser)) < 0) {
-			return -1;
-		}
-		break;
-	}
-	return 0;
+	return reads[type](parser);
 }
 
 static int parser_ReadInstruction(struct parser *parser)
@@ -541,7 +606,7 @@ static int parser_ReadInstruction(struct parser *parser)
 	return 0;
 }
 
-static Function *parser_ReadFunction(struct parser *parser)
+static int parser_ReadFunction(struct parser *parser)
 {
 	Function *func;
 	type_t type;
@@ -550,29 +615,29 @@ static Function *parser_ReadFunction(struct parser *parser)
 
 	func = union_Alloc(union_Default(), sizeof(*func));
 	if (func == NULL) {
-		return NULL;
+		return -1;
 	}
 
 	/* read parameters */
 	while (parser->c != '{') {
 		/* parameter type */
 		if (parser_ReadWord(parser) < 0) {
-			return NULL;
+			return -1;
 		}
 		type = parser_CheckType(parser);
 		if (type == TYPE_NULL) {
-			return NULL;
+			return -1;
 		}
 		/* parameter name */
 		parser_SkipSpace(parser);
 		if (parser_ReadWord(parser) < 0) {
-			return NULL;
+			return -1;
 		}
 		/* NOT parser->uni! */
 		newParams = union_Realloc(union_Default(), params,
 				sizeof(*params) * (numParams + 1));
 		if (newParams == NULL) {
-			return NULL;
+			return -1;
 		}
 		params = newParams;
 		params[numParams].type = type;
@@ -580,7 +645,7 @@ static Function *parser_ReadFunction(struct parser *parser)
 		numParams++;
 		parser_SkipSpace(parser);
 		if (parser->c != ',' && parser->c != '{') {
-			return NULL;
+			return -1;
 		}
 		if (parser->c == ',') {
 			parser_NextChar(parser); /* skip ',' */
@@ -589,13 +654,14 @@ static Function *parser_ReadFunction(struct parser *parser)
 	}
 
 	if (parser_ReadBody(parser) < 0) {
-		return NULL;
+		return -1;
 	}
 	func->params = params;
 	func->numParams = numParams;
 	func->instructions = parser->instructions;
 	func->numInstructions = parser->numInstructions;
-	return func;
+	parser->value.func = func;
+	return 0;
 }
 
 static int parser_ReadLabel(struct parser *parser)

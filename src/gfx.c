@@ -2,8 +2,8 @@
 
 int renderer_SetDrawColor(Renderer *renderer, Uint32 color)
 {
-	return SDL_SetRenderDrawColor(renderer, color & 0xff,
-			(color >> 8) & 0xff, (color >> 16) & 0xff, 255);
+	return SDL_SetRenderDrawColor(renderer, (color >> 16) & 0xff,
+			(color >> 8) & 0xff, color & 0xff, 255);
 }
 
 int renderer_SetDrawColorRGB(Renderer *renderer, Uint8 r, Uint8 g, Uint8 b)

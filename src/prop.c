@@ -79,7 +79,6 @@ static int EvaluateInstruction(struct context *ctx, Instruction *instr, Property
 		prop->value = instr->value.value;
 		break;
 	case INSTR_VARIABLE:
-		printf("searching for: %s\n", instr->variable.name);
 		var = SearchVariable(ctx, instr->variable.name);
 		if (var == NULL) {
 			return -1;
@@ -218,6 +217,16 @@ static int SystemEquals(Property *args, Uint32 numArgs, Property *result)
 					return 0;
 				}
 				break;
+			case TYPE_STRING:
+				if (args[i].value.s.length !=
+						args[j].value.s.length ||
+						memcmp(args[i].value.s.data,
+						args[j].value.s.data,
+						args[i].value.s.length) != 0) {
+					result->value.b = false;
+					return 0;
+				}
+				break;
 			}
 		}
 	}
@@ -261,6 +270,7 @@ static int ExecuteSystem(struct context *ctx, const char *call,
 		const char *name;
 		int (*call)(Property *args, Uint32 numArgs, Property *result);
 	} functions[] = {
+		/* TODO: add more system functions */
 		{ "equals", SystemEquals },
 		{ "sum", SystemSum },
 	};
@@ -283,10 +293,7 @@ static int ExecuteSystem(struct context *ctx, const char *call,
 			return -1;
 		}
 	}
-	printf("Exec system: %s[%p (%u)]\n", call, args, numArgs);
-	const int r = sys->call(props, numArgs, result);
-	printf("ret=%d\n", r);
-	return r;
+	return sys->call(props, numArgs, result);
 }
 
 static int ExecuteFunction(struct context *ctx, Function *func,
@@ -406,7 +413,6 @@ int prop_Evaluate(Union *uni, RawWrapper *wrappers, Uint32 numWrappers,
 	for (Uint32 i = 0; i < numWrappers; i++) {
 		ctx.cur = i;
 		if (EvaluateNext(&ctx) < 0) {
-
 			return -1;
 		}
 	}

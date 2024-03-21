@@ -1,0 +1,7 @@
+Console window: Entering a command will parse and call ExecuteInstruction. This
+can be used to debug and observe windows.
+
+Text window: Dynamically change properties of objects.
+
+Still, everything should be done in C. All features of the property language are
+not for deploying, just for debugging and testing purposes.

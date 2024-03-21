@@ -9,6 +9,7 @@ void type_Print(type_t type, FILE *fp)
 		[TYPE_FONT] = "font",
 		[TYPE_FUNCTION] = "function",
 		[TYPE_INTEGER] = "int",
+		[TYPE_STRING] = "string",
 	};
 	fprintf(fp, "%s", words[type]);
 }
@@ -33,6 +34,26 @@ void function_Print(const Function *function, FILE *fp)
 	fputc('}', fp);
 }
 
+void string_Print(const struct string *s, FILE *fp)
+{
+	for (Uint32 i = 0; i < s->length; i++) {
+		char c;
+
+		c = s->data[i];
+		if (c < ' ' || c >= 0x7f) {
+			fputc('\\', fp);
+			for (int i = 6; i >= 0; i -= 3) {
+				fputc(((c >> i) & 0x7) + '0', fp);
+			}
+		} else if (c == '\\') {
+			fputc('\\', fp);
+			fputc('\\', fp);
+		} else {
+			fputc(c, fp);
+		}
+	}
+}
+
 void property_Print(const Property *property, FILE *fp)
 {
 	fprintf(fp, "  .%s = ", property->name);
@@ -40,6 +61,7 @@ void property_Print(const Property *property, FILE *fp)
 	fputc(' ', fp);
 	switch (property->type) {
 	case TYPE_NULL:
+		/* should not happen */
 		break;
 	case TYPE_BOOL:
 		fprintf(fp, "%s", property->value.b ?
@@ -59,6 +81,9 @@ void property_Print(const Property *property, FILE *fp)
 		break;
 	case TYPE_INTEGER:
 		fprintf(fp, "%ld", property->value.i);
+		break;
+	case TYPE_STRING:
+		string_Print(&property->value.s, fp);
 		break;
 	}
 	fputc('\n', fp);

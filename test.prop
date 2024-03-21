@@ -1,13 +1,14 @@
 Button:
 	.background = color 0x60609f
-	.away = color 0xff0000
-	.shadow = color 0xff0000
+	.away = color red
+	.shadow = color red
 	.outline = color 0x5b1200
-	.text = color 0x00ff00
-	.press = color black
-	.hover = color black
+	.text = color green
+	.press = color brown
+	.hover = color yellow
 	.circular = bool true
 	.font = font default
+	.text = string "hello"
 	.func = function int x, int y {
 		trigger happy
 		set a = bool true
@@ -19,6 +20,12 @@ Button:
 		}
 		return sum(x, y, x, y)
 	}
+	.ff = float 14.22e3
+	.t1 = string "hey\n"
+	.t2 = string "hey\n"
+	.t3 = string "bye\n"
+	.equ = equals(t1, t2)
+	.all = equals(t1, t2, t3)
 	.a = int 33
 	.b = int 44
 	.c = sum(a, b)

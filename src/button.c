@@ -18,6 +18,8 @@ void button_Render(View *view)
 	struct button *const b = union_Mask(view->uni, V_EXTRA, NULL);
 	(void) b;
 
+	renderer = renderer_Default();
+
 	bg = view_GetColorProperty(view, "background");
 	away = view_GetColorProperty(view, "away");
 	shadow = view_GetColorProperty(view, "shadow");
@@ -32,7 +34,6 @@ void button_Render(View *view)
 	(void) outline;
 	(void) shadow;
 
-	renderer = renderer_Default();
 	if (view->flags & F_PRESSED) {
 		if (view->flags & F_HOVERED) {
 			renderer_SetDrawColor(renderer, press);

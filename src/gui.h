@@ -171,12 +171,8 @@ typedef enum type {
 	TYPE_FONT,
 	TYPE_FUNCTION,
 	TYPE_INTEGER,
+	TYPE_STRING,
 } type_t;
-
-typedef struct parameter {
-	type_t type;
-	char name[256];
-} Parameter;
 
 typedef enum {
 	INSTR_EVENT,
@@ -191,12 +187,22 @@ typedef enum {
 
 struct instruction;
 
+typedef struct parameter {
+	type_t type;
+	char name[256];
+} Parameter;
+
 typedef struct function {
 	Parameter *params;
 	Uint32 numParams;
 	struct instruction *instructions;
 	Uint32 numInstructions;
 } Function;
+
+struct string {
+	char *data;
+	Uint32 length;
+};
 
 typedef union value {
 	bool b;
@@ -205,6 +211,7 @@ typedef union value {
 	void *font;
 	Function *func;
 	Sint64 i;
+	struct string s;
 } Value;
 
 struct instr_event {
