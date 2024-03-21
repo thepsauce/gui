@@ -79,7 +79,7 @@ static int HexToInt(char ch)
 
 static int parser_ReadString(struct parser *parser)
 {
-	struct string s;
+	struct value_string s;
 	char *newData;
 
 	s.data = NULL;
@@ -146,6 +146,7 @@ static type_t parser_CheckType(struct parser *parser)
 		[TYPE_FONT] = "font",
 		[TYPE_FUNCTION] = "function",
 		[TYPE_INTEGER] = "int",
+		[TYPE_OBJECT] = "object",
 		[TYPE_STRING] = "string"
 	};
 	if (parser->nWord == 0) {
@@ -304,8 +305,14 @@ static int parser_ReadFloat(struct parser *parser)
 			back *= 10;
 		}
 	}
-	for (Sint32 i = 0; i < exponent; i++) {
-		front *= 10;
+	if (exponent < 0) {
+		for (Sint32 i = exponent; i < 0; i++) {
+			front /= 10;
+		}
+	} else {
+		for (Sint32 i = 0; i < exponent; i++) {
+			front *= 10;
+		}
 	}
 	parser->value.f = sign * (front + back);
 	return 0;
@@ -350,6 +357,19 @@ static int parser_ReadColor(struct parser *parser)
 		}
 	}
 	return -1;
+}
+
+static int parser_ReadObject(struct parser *parser)
+{
+	if (parser_ReadWord(parser) < 0) {
+		return -1;
+	}
+	parser_SkipSpace(parser);
+	if (strcmp(parser->word, "this") == 0) {
+		/* TODO: this is quite complex and will be added
+		 * when the big View interaction is being added */
+	}
+	return 0;
 }
 
 /* -=-=-=-=-=-=-=-=- Instruction -=-=-=-=-=-=-=-=- */
@@ -485,6 +505,52 @@ static int parser_ReadInvoke(struct parser *parser)
 	return 0;
 }
 
+static int parser_ReadLocalOrSet(struct parser *parser, instr_t instr)
+{
+	Instruction *pInstr;
+
+	if (parser_ReadWord(parser) < 0) {
+		return -1;
+	}
+	strcpy(parser->instruction.set.variable, parser->word);
+	parser_SkipSpace(parser);
+	if (parser->c != '=') {
+		return -1;
+	}
+	parser_NextChar(parser); /* skip '=' */
+	parser_SkipSpace(parser);
+
+	/* save this because it will be overwritten */
+	const Instruction instruction = parser->instruction;
+	if (parser_ReadInstruction(parser) < 0) {
+		return -1;
+	}
+	pInstr = union_Alloc(union_Default(), sizeof(*pInstr));
+	if (pInstr == NULL) {
+		return -1;
+	}
+	*pInstr = parser->instruction;
+	parser->instruction = instruction;
+	parser->instruction.instr = instr;
+	parser->instruction.set.value = pInstr;
+	return 0;
+}
+
+static int parser_ReadLocal(struct parser *parser)
+{
+	return parser_ReadLocalOrSet(parser, INSTR_LOCAL);
+}
+
+static int parser_ReadNew(struct parser *parser)
+{
+	if (parser_ReadWord(parser) < 0) {
+		return -1;
+	}
+	parser->instruction.instr = INSTR_NEW;
+	strcpy(parser->instruction.new.class, parser->word);
+	return 0;
+}
+
 static int parser_ReadReturn(struct parser *parser)
 {
 	Instruction *instr;
@@ -504,33 +570,7 @@ static int parser_ReadReturn(struct parser *parser)
 
 static int parser_ReadSet(struct parser *parser)
 {
-	Instruction *pInstr;
-
-	if (parser_ReadWord(parser) < 0) {
-		return -1;
-	}
-	strcpy(parser->instruction.set.variable, parser->word);
-	parser_SkipSpace(parser);
-	if (parser->c != '=') {
-		return -1;
-	}
-	parser_NextChar(parser); /* skip '=' */
-	parser_SkipSpace(parser);
-
-	/* save this because it will be overwritten */
-	const Instruction instr = parser->instruction;
-	if (parser_ReadInstruction(parser) < 0) {
-		return -1;
-	}
-	pInstr = union_Alloc(union_Default(), sizeof(*pInstr));
-	if (pInstr == NULL) {
-		return -1;
-	}
-	*pInstr = parser->instruction;
-	parser->instruction = instr;
-	parser->instruction.instr = INSTR_SET;
-	parser->instruction.set.value = pInstr;
-	return 0;
+	return parser_ReadLocalOrSet(parser, INSTR_SET);
 }
 
 static int parser_ReadTrigger(struct parser *parser)
@@ -554,6 +594,7 @@ static int parser_ReadValue(struct parser *parser, type_t type)
 		[TYPE_FONT] = parser_ReadFont,
 		[TYPE_FUNCTION] = parser_ReadFunction,
 		[TYPE_INTEGER] = parser_ReadInt,
+		[TYPE_OBJECT] = parser_ReadObject,
 		[TYPE_STRING] = parser_ReadString,
 	};
 	if (type == TYPE_NULL) {
@@ -570,6 +611,8 @@ static int parser_ReadInstruction(struct parser *parser)
 	} keywords[] = {
 		{ "event", parser_ReadEvent },
 		{ "if", parser_ReadIf },
+		{ "local", parser_ReadLocal },
+		{ "new", parser_ReadNew },
 		{ "return", parser_ReadReturn },
 		{ "set", parser_ReadSet },
 		{ "trigger", parser_ReadTrigger },

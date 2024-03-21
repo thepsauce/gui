@@ -171,6 +171,7 @@ typedef enum type {
 	TYPE_FONT,
 	TYPE_FUNCTION,
 	TYPE_INTEGER,
+	TYPE_OBJECT,
 	TYPE_STRING,
 } type_t;
 
@@ -178,6 +179,8 @@ typedef enum {
 	INSTR_EVENT,
 	INSTR_IF,
 	INSTR_INVOKE,
+	INSTR_LOCAL,
+	INSTR_NEW,
 	INSTR_RETURN,
 	INSTR_SET,
 	INSTR_TRIGGER,
@@ -199,7 +202,13 @@ typedef struct function {
 	Uint32 numInstructions;
 } Function;
 
-struct string {
+struct value_object {
+	/* TODO: Replace with class pointer? */
+	char class[256];
+	void *data;
+};
+
+struct value_string {
 	char *data;
 	Uint32 length;
 };
@@ -211,7 +220,8 @@ typedef union value {
 	void *font;
 	Function *func;
 	Sint64 i;
-	struct string s;
+	struct value_object object;
+	struct value_string s;
 } Value;
 
 struct instr_event {
@@ -229,6 +239,15 @@ struct instr_invoke {
 	char name[256];
 	struct instruction *args;
 	Uint32 numArgs;
+};
+
+struct instr_local {
+	char name[256];
+	struct instruction *value;
+};
+
+struct instr_new {
+	char class[256];
 };
 
 struct instr_return {
@@ -259,6 +278,8 @@ typedef struct instruction {
 		struct instr_event event;
 		struct instr_if iff;
 		struct instr_invoke invoke;
+		struct instr_local local;
+		struct instr_new new;
 		struct instr_return ret;
 		struct instr_set set;
 		struct instr_trigger trigger;

@@ -56,6 +56,7 @@ static int EvaluateInstruction(struct context *ctx, Instruction *instr, Property
 	switch (instr->instr) {
 	case INSTR_EVENT:
 	case INSTR_IF:
+	case INSTR_LOCAL:
 	case INSTR_RETURN:
 	case INSTR_SET:
 	case INSTR_TRIGGER:
@@ -73,6 +74,10 @@ static int EvaluateInstruction(struct context *ctx, Instruction *instr, Property
 					instr->invoke.numArgs, prop) < 0) {
 			return -1;
 		}
+		break;
+	case INSTR_NEW:
+		/* TODO: */
+		/* objects can be of type View or Rect or Point etc. */
 		break;
 	case INSTR_VALUE:
 		prop->type = instr->type;
@@ -93,6 +98,7 @@ static int ExecuteInstruction(struct context *ctx, Instruction *instr, Property 
 {
 	Property *var;
 	bool b;
+	Property *newStack;
 
 	switch (instr->instr) {
 	case INSTR_EVENT:
@@ -113,6 +119,19 @@ static int ExecuteInstruction(struct context *ctx, Instruction *instr, Property 
 			return ExecuteInstructions(ctx, instr->iff.instructions,
 					instr->iff.numInstructions, prop);
 		}
+		break;
+	case INSTR_LOCAL:
+		if (EvaluateInstruction(ctx, instr->local.value, prop) < 0) {
+			return -1;
+		}
+		newStack = union_Realloc(union_Default(), ctx->stack,
+				sizeof(*ctx->stack) * (ctx->numStack + 1));
+		if (newStack == NULL) {
+			return -1;
+		}
+		ctx->stack = newStack;
+		strcpy(prop->name, instr->local.name);
+		ctx->stack[ctx->numStack++] = *prop;
 		break;
 	case INSTR_RETURN:
 		if (EvaluateInstruction(ctx, instr->ret.value, prop) < 0) {
@@ -151,6 +170,7 @@ static int ExecuteInstruction(struct context *ctx, Instruction *instr, Property 
 		break;
 	case INSTR_VALUE:
 	case INSTR_VARIABLE:
+	case INSTR_NEW:
 		break;
 	}
 	return 0;
@@ -210,6 +230,8 @@ static int SystemEquals(Property *args, Uint32 numArgs, Property *result)
 					result->value.b = false;
 					return 0;
 				}
+				break;
+			case TYPE_OBJECT:
 				break;
 			case TYPE_FUNCTION:
 				if (args[i].value.func != args[j].value.func) {
@@ -314,6 +336,12 @@ static int ExecuteFunction(struct context *ctx, Function *func,
 	}
 	ctx->stack = newStack;
 
+	/* it can happen that the stack grows with local variables,
+	 * so we just save this so we can reset the stack to
+	 * delete all local variables at once
+	 */
+	const Uint32 oldNumStack = ctx->numStack;
+
 	for (Uint32 i = 0; i < numArgs; i++) {
 		if (EvaluateInstruction(ctx, &args[i],
 					&ctx->stack[ctx->numStack]) < 0) {
@@ -333,7 +361,7 @@ static int ExecuteFunction(struct context *ctx, Function *func,
 	if (r == 1) {
 		*result = prop;
 	}
-	ctx->numStack -= numArgs;
+	ctx->numStack = oldNumStack;
 	return 0;
 }
 

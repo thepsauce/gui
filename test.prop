@@ -10,17 +10,26 @@ Button:
 	.font = font default
 	.text = string "hello"
 	.func = function int x, int y {
+		local l1 = int 22
+		local l2 = float 2.3
+		; ClassName will be replaced
+		with something sensible soon ;
+		local obj = new ClassName
+		; does not do anything yet ;
+		local me = object this
 		trigger happy
-		set a = bool true
+		; not sure if this will be kept, maybe
+		replace with an property event class ;
 		event keydown A
 	}
 	.s = function int x, int y {
-		if equals(x, int 3) {
+		local l = int 3
+		if equals(x, l) {
 			set x = int 4
 		}
 		return sum(x, y, x, y)
 	}
-	.ff = float 14.22e3
+	.ff = float 14.22e-3
 	.t1 = string "hey\n"
 	.t2 = string "hey\n"
 	.t3 = string "bye\n"

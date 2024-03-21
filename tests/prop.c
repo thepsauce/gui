@@ -9,6 +9,7 @@ void type_Print(type_t type, FILE *fp)
 		[TYPE_FONT] = "font",
 		[TYPE_FUNCTION] = "function",
 		[TYPE_INTEGER] = "int",
+		[TYPE_OBJECT] = "object",
 		[TYPE_STRING] = "string",
 	};
 	fprintf(fp, "%s", words[type]);
@@ -34,7 +35,7 @@ void function_Print(const Function *function, FILE *fp)
 	fputc('}', fp);
 }
 
-void string_Print(const struct string *s, FILE *fp)
+void string_Print(const struct value_string *s, FILE *fp)
 {
 	for (Uint32 i = 0; i < s->length; i++) {
 		char c;
@@ -82,6 +83,9 @@ void property_Print(const Property *property, FILE *fp)
 	case TYPE_INTEGER:
 		fprintf(fp, "%ld", property->value.i);
 		break;
+	case TYPE_OBJECT:
+	        fprintf(fp, "%s", property->value.object.class);
+	        break;
 	case TYPE_STRING:
 		string_Print(&property->value.s, fp);
 		break;
