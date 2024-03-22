@@ -1,0 +1,18 @@
+Button:
+	.background = color 0x60609f
+	.away = color red
+	.shadow = color red
+	.outline = color 0x5b1200
+	.text = color green
+	.press = color brown
+	.hover = color yellow
+	.circular = bool true
+	.font = font default
+	.init = function {
+		print(string "Init\n")
+	}
+	.draw = function {
+		local r = GetRect(this)
+		SetDrawColor(background)
+		FillRect(r)
+	}

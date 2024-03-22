@@ -24,6 +24,10 @@ void *union_Allocf(Union *uni, size_t sz, Uint64 flags)
 	struct mem_ptr *ptrs;
 	struct mem_ptr ptr;
 
+	if (sz == 0) {
+		return NULL;
+	}
+
 	if (uni->allocated + sz > uni->limit) {
 		PRINT_DEBUG();
 		fprintf(stderr, "limit exceeded old=%zu, new=%zu but limit=%zu\n",
@@ -37,7 +41,7 @@ void *union_Allocf(Union *uni, size_t sz, Uint64 flags)
 	if (ptrs == NULL) {
 		PRINT_DEBUG();
 		fprintf(stderr, "system error after an attempt"
-				"to allocate a shadow: %s\n",
+				" to allocate a shadow: %s\n",
 				strerror(errno));
 		return NULL;
 	}
@@ -47,7 +51,7 @@ void *union_Allocf(Union *uni, size_t sz, Uint64 flags)
 	if (ptr.sys == NULL) {
 		PRINT_DEBUG();
 		fprintf(stderr, "system error after an attempt"
-				"to allocate %zu bytes: %s\n",
+				" to allocate %zu bytes: %s\n",
 				sz, strerror(errno));
 		return NULL;
 	}
@@ -77,11 +81,15 @@ void *union_Realloc(Union *uni, void *ptr, Size sz)
 	if (index == uni->numPointers) {
 		PRINT_DEBUG();
 		fprintf(stderr, "trying to reallocate non existant pointer"
-				"%p to size %zu\n", ptr, sz);
+				" %p to size %zu\n", ptr, sz);
 		return NULL;
 	}
 
 	oldPtr = &uni->pointers[index];
+
+	if (oldPtr->size == sz) {
+		return ptr;
+	}
 
 	if (uni->allocated - oldPtr->size + sz > uni->limit) {
 		PRINT_DEBUG();
@@ -96,7 +104,7 @@ void *union_Realloc(Union *uni, void *ptr, Size sz)
 	if (newPtr.sys == NULL) {
 		PRINT_DEBUG();
 		fprintf(stderr, "system error after an attempt"
-				"to reallocate %zu bytes to %zu bytes: %s\n",
+				" to reallocate %zu bytes to %zu bytes: %s\n",
 				oldPtr->size, sz, strerror(errno));
 		return NULL;
 	}

@@ -14,6 +14,8 @@ Renderer *renderer_Default(void)
 
 int gui_Init(Uint32 flags)
 {
+	(void) flags;
+
 	srand(time(NULL));
 	if (SDL_Init(SDL_INIT_VIDEO) < 0) {
 		printf("SDL could not be initialized: %s\n", SDL_GetError());
@@ -36,10 +38,6 @@ int gui_Init(Uint32 flags)
 	}
 	gui_renderer = SDL_CreateRenderer(gui_window, -1,
 			SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-
-	if (flags & GUI_INIT_CLASSES) {
-		class_Create("Button", button_Proc);
-	}
 	return 0;
 }
 

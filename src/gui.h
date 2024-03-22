@@ -183,12 +183,14 @@ typedef enum {
 	INSTR_NEW,
 	INSTR_RETURN,
 	INSTR_SET,
+	INSTR_THIS,
 	INSTR_TRIGGER,
 	INSTR_VALUE,
 	INSTR_VARIABLE,
 } instr_t;
 
 struct instruction;
+struct property;
 
 typedef struct parameter {
 	type_t type;
@@ -202,9 +204,20 @@ typedef struct function {
 	Uint32 numInstructions;
 } Function;
 
+struct object_function {
+	char name[256];
+	int (*func)(void *data, struct property *args, Uint32 numArgs,
+			struct property *result);
+};
+
+struct object_class {
+	char name[256];
+	Size size;
+	struct object_class *next;
+};
+
 struct value_object {
-	/* TODO: Replace with class pointer? */
-	char class[256];
+	struct object_class *class;
 	void *data;
 };
 
@@ -309,27 +322,21 @@ typedef struct label {
 	char name[256];
 	Property *properties;
 	Uint32 numProperties;
+	EventProc proc;
+	struct label *next;
 } Label;
 
 int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 		Uint32 *pNumWrappers);
-int prop_Evaluate(Union *uni, RawWrapper *wrappers, Uint32 numWrappers,
-		Label **pLabels, Uint32 *pNumLabels);
-int prop_Digest(const Label *label, Uint32 numLabels);
 
-typedef struct view_class {
-	char name[256];
-	EventProc proc;
-	Property *properties;
-	Uint32 numProperties;
-	struct view_class *next;
-} Class;
-
-Class *class_Create(const char *name, EventProc proc);
-Class *class_Find(const char *name);
+int environment_ExecuteFunction(Function *func, Instruction *args,
+		Uint32 numArgs, Property *result);
+Label *environment_FindLabel(const char *name);
+Label *environment_AddLabel(const char *name);
+int environment_Digest(RawWrapper *wrappers, Uint32 numWrappers);
 
 typedef struct view {
-	Class *class;
+	Label *label;
 	Union *uni;
 	Uint64 flags;
 	Rect rect;
@@ -340,7 +347,7 @@ typedef struct view {
 } View;
 
 View *view_Default(void);
-View *view_Create(const char *className, const Rect *rect);
+View *view_Create(const char *labelName, const Rect *rect);
 int view_SendRecursive(View *view, event_t type, EventInfo *info);
 int view_Send(View *view, event_t type, EventInfo *info);
 Value *view_GetProperty(View *view, type_t type, const char *name);

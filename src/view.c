@@ -8,64 +8,23 @@ int BaseProc(View *view, event_t type, EventInfo *info)
 	return 0;
 }
 
-Class base_class = {
-	"!Base",
-	BaseProc,
-	NULL,
-	0,
-	NULL
-};
-
-Class *first_class = &base_class;
-Class *last_class = &base_class;
-
-View base_view = {
-	.class = &base_class
-};
+View base_view;
 
 View *view_Default(void)
 {
 	return &base_view;
 }
 
-Class *class_Create(const char *name, EventProc proc)
+View *view_Create(const char *labelName, const Rect *rect)
 {
-	Class *class;
-
-	class = union_Alloc(union_Default(), sizeof(*class));
-	if (class == NULL) {
-		return NULL;
-	}
-	strncpy(class->name, name, sizeof(class->name));
-	class->proc = proc;
-	class->properties = NULL;
-	class->numProperties = 0;
-	class->next = NULL;
-	last_class->next = class;
-	last_class = class;
-	return class;
-}
-
-Class *class_Find(const char *name)
-{
-	for (Class *class = first_class; class != NULL; class = class->next) {
-		if (strcmp(class->name, name) == 0) {
-			return class;
-		}
-	}
-	return NULL;
-}
-
-View *view_Create(const char *className, const Rect *rect)
-{
-	Class *class;
+	Label *label;
 	Union *uni;
 	View *view;
 
-	class = class_Find(className);
-	if (class == NULL) {
+	label = environment_FindLabel(labelName);
+	if (label == NULL) {
 		PRINT_DEBUG();
-		fprintf(stderr, "invalid class name: %s\n", className);
+		fprintf(stderr, "invalid label name: %s\n", labelName);
 		return NULL;
 	}
 
@@ -79,25 +38,25 @@ View *view_Create(const char *className, const Rect *rect)
 		union_Free(union_Default(), uni);
 		return NULL;
 	}
-	view->class = class;
+	view->label = label;
 	view->uni = uni;
 	view->rect = *rect;
 	view->values = union_Alloc(uni, sizeof(*view->values) *
-			class->numProperties);
+			label->numProperties);
 	if (view->values == NULL) {
 		union_Free(uni, view);
 		union_Free(union_Default(), uni);
 		return NULL;
 	}
-	for (Uint32 i = 0; i < class->numProperties; i++) {
-		view->values[i] = class->properties[i].value;
+	for (Uint32 i = 0; i < label->numProperties; i++) {
+		view->values[i] = label->properties[i].value;
 	}
 	view->region = NULL;
 	view->prev = NULL;
 	view->next = NULL;
 	view->child = NULL;
 	view->parent = NULL;
-	class->proc(view, EVENT_CREATE, NULL);
+	label->proc(view, EVENT_CREATE, NULL);
 	return view;
 }
 
@@ -107,20 +66,23 @@ int view_SendRecursive(View *view, event_t type, EventInfo *info)
 		if (view->child != NULL) {
 			view_SendRecursive(view->child, type, info);
 		}
-		view->class->proc(view, type, info);
+		/* TODO: keep this? */
+		if (view->label != NULL) {
+			view->label->proc(view, type, info);
+		}
 	}
 	return 0;
 }
 
 int view_Send(View *view, event_t type, EventInfo *info)
 {
-	return view->class->proc(view, type, info);
+	return view->label->proc(view, type, info);
 }
 
 Value *view_GetProperty(View *view, type_t type, const char *name)
 {
-	for (Uint32 i = 0; i < view->class->numProperties; i++) {
-		Property *const prop = &view->class->properties[i];
+	for (Uint32 i = 0; i < view->label->numProperties; i++) {
+		Property *const prop = &view->label->properties[i];
 		if (type == prop->type && strcmp(prop->name, name) == 0) {
 			return &view->values[i];
 		}

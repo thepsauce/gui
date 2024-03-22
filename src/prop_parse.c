@@ -365,9 +365,9 @@ static int parser_ReadObject(struct parser *parser)
 		return -1;
 	}
 	parser_SkipSpace(parser);
-	if (strcmp(parser->word, "this") == 0) {
-		/* TODO: this is quite complex and will be added
-		 * when the big View interaction is being added */
+	if (strcmp(parser->word, "null") == 0) {
+		parser->value.object.class = NULL;
+		parser->value.object.data = NULL;
 	}
 	return 0;
 }
@@ -573,6 +573,12 @@ static int parser_ReadSet(struct parser *parser)
 	return parser_ReadLocalOrSet(parser, INSTR_SET);
 }
 
+static int parser_ReadThis(struct parser *parser)
+{
+	parser->instruction.instr = INSTR_THIS;
+	return 0;
+}
+
 static int parser_ReadTrigger(struct parser *parser)
 {
 	if (parser_ReadWord(parser) < 0) {
@@ -615,6 +621,7 @@ static int parser_ReadInstruction(struct parser *parser)
 		{ "new", parser_ReadNew },
 		{ "return", parser_ReadReturn },
 		{ "set", parser_ReadSet },
+		{ "this", parser_ReadThis },
 		{ "trigger", parser_ReadTrigger },
 	};
 
@@ -840,5 +847,6 @@ fail:
 		fputc(' ', stderr);
 	}
 	fputc('^', stderr);
+	fputc('\n', stderr);
 	return -1;
 }

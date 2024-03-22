@@ -19,7 +19,7 @@ Button:
 		local me = object this
 		trigger happy
 		; not sure if this will be kept, maybe
-		replace with an property event class ;
+		replace with a property event class ;
 		event keydown A
 	}
 	.s = function int x, int y {
