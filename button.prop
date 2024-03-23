@@ -6,13 +6,49 @@ Button:
 	.text = color green
 	.press = color brown
 	.hover = color yellow
+	.is_hovered = bool false
+	.is_pressed = bool false
 	.circular = bool true
 	.font = font default
 	.init = function {
 		print(string "Init\n")
 	}
 	.draw = function {
-		local r = GetRect(this)
-		SetDrawColor(background)
-		FillRect(r)
+		if is_pressed {
+			if is_hovered {
+				SetDrawColor(press)
+			} else {
+				SetDrawColor(away)
+			}
+		} else {
+			if is_hovered {
+				SetDrawColor(hover)
+			} else {
+				SetDrawColor(background)
+			}
+		}
+		FillRect(GetRect(this))
 	}
+	.event = function object Event e {
+		if equals(GetType(e), const EVENT_MOUSEMOVE) {
+			if Contains(GetRect(this), GetPos(e)) {
+				set is_hovered = bool true
+			} else {
+				set is_hovered = bool false
+			}
+		} else if equals(GetType(e), const EVENT_MOUSEDOWN) {
+			if equals(GetButton(e), const BUTTON_LEFT) {
+				set is_pressed = is_hovered
+			}
+		}
+	}
+
+
+
+
+
+
+
+
+
+

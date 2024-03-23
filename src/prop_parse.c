@@ -1,14 +1,17 @@
 #include "gui.h"
 
 #define MAX_WORD 256
+#define PARSER_BUFFER 128
 
 struct parser {
 	Union uni;
 	FILE *file;
+	/* circular buffer */
+	char buffer[1024];
+	Uint32 iRead, iWrite;
 	long line;
 	int column;
 	int c;
-	int prev_c;
 	char word[MAX_WORD];
 	int nWord;
 	char label[MAX_WORD];
@@ -19,10 +22,49 @@ struct parser {
 	Uint32 numInstructions;
 };
 
+static void parser_Refresh(struct parser *parser)
+{
+	unsigned int nWritten;
+
+	if (feof(parser->file)) {
+		return;
+	}
+	if (parser->iRead > parser->iWrite) {
+		nWritten = sizeof(parser->buffer) - parser->iRead +
+			parser->iWrite;
+	} else {
+		nWritten = parser->iWrite - parser->iRead;
+	}
+	if (nWritten < sizeof(parser->buffer) / 2) {
+		if (parser->iRead < parser->iWrite) {
+			const size_t n = fread(&parser->buffer[parser->iWrite],
+					1, sizeof(parser->buffer) -
+					parser->iWrite, parser->file);
+			if (parser->iRead > 0) {
+				parser->iWrite = fread(&parser->buffer[0], 1,
+						parser->iRead - 1,
+						parser->file);
+			} else {
+				parser->iWrite += n;
+			}
+		} else {
+			const size_t n = fread(&parser->buffer[parser->iWrite],
+					1, sizeof(parser->buffer) - 1 -
+					nWritten, parser->file);
+			parser->iWrite += n;
+		}
+	}
+}
+
 static int parser_NextChar(struct parser *parser)
 {
-	parser->prev_c = parser->c;
-	parser->c = fgetc(parser->file);
+	parser_Refresh(parser);
+	if (parser->iRead == parser->iWrite) {
+		parser->c = EOF;
+		return EOF;
+	}
+	parser->c = parser->buffer[parser->iRead++];
+	parser->iRead %= sizeof(parser->buffer);
 	if (parser->c == '\n') {
 		parser->line++;
 		parser->column = 0;
@@ -458,6 +500,7 @@ static int parser_ReadIf(struct parser *parser)
 	if (parser_ReadBody(parser) < 0) {
 		return -1;
 	}
+	parser_SkipSpace(parser);
 	parser->instruction.instr = INSTR_IF;
 	parser->instruction.iff.condition = cond;
 	parser->instruction.iff.instructions = parser->instructions;
@@ -778,7 +821,6 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 	struct parser parser;
 	RawWrapper *wrappers = NULL, *newWrappers;
 	Uint32 numWrappers = 0;
-	int tabs = 0;
 
 	/* this is for convenience:
 	 * all parser functions allocate memory using the default union
@@ -792,7 +834,10 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 	memset(&parser, 0, sizeof(parser));
 	union_Init(&parser.uni, SIZE_MAX);
 	parser.file = file;
-	parser.c = fgetc(file);
+	/* we buffer ourselves */
+	setvbuf(file, NULL, _IONBF, 0);
+
+	parser_NextChar(&parser);
 
 	while (parser_SkipSpace(&parser), parser.c != EOF) {
 		if (parser.c == '.') {
@@ -830,23 +875,37 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 fail:
 	union_FreeAll(&parser.uni);
 	union_Trim(defUni, numPtrs);
-	fprintf(stderr, "parser error at line %ld\n", parser.line + 1);
-	fseek(file, -parser.column, SEEK_CUR);
-	for (int i = 0; i < parser.column; i++) {
-		const int c = fgetc(file);
-		fputc(c, stderr);
-		if (c == '\t') {
-			tabs++;
+	fprintf(stderr, "parser error at line %ld\n> ", parser.line + 1);
+	Uint32 p = parser.iRead, i, n = 0;
+	for (i = 0; i < (Uint32) parser.column; i++) {
+		if (p == 0) {
+			p = sizeof(parser.buffer) - 1;
+		} else {
+			p--;
+		}
+		if (p == parser.iWrite) {
+			break;
+		}
+		n++;
+	}
+	for (i = 0; i < n; i++) {
+		if (!isspace(parser.buffer[p])) {
+			break;
+		}
+		if (p == sizeof(parser.buffer) - 1) {
+			p = 0;
+		} else {
+			p++;
 		}
 	}
-	fputc('\n', stderr);
-	for (int i = 0; i < tabs; i++) {
-		fputc('\t', stderr);
+	for (i = 0; i < n; i++) {
+		fputc(parser.buffer[p], stderr);
+		if (p == sizeof(parser.buffer) - 1) {
+			p = 0;
+		} else {
+			p++;
+		}
 	}
-	for (int i = 0; i < parser.column - tabs; i++) {
-		fputc(' ', stderr);
-	}
-	fputc('^', stderr);
 	fputc('\n', stderr);
 	return -1;
 }
