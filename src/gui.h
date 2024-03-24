@@ -114,20 +114,13 @@ typedef enum {
 	EVENT_KEYDOWN,
 	EVENT_CHAR,
 	EVENT_KEYUP,
-	EVENT_LBUTTONDOWN,
-	EVENT_RBUTTONDOWN,
-	EVENT_MBUTTONDOWN,
-	EVENT_LBUTTONUP,
-	EVENT_RBUTTONUP,
-	EVENT_MBUTTONUP,
+	EVENT_BUTTONDOWN,
+	EVENT_BUTTONUP,
 	EVENT_MOUSEMOVE,
 	EVENT_MOUSEMOVEOUTSIDE,
 	EVENT_CAPTUREDMOVE,
 	EVENT_SETCURSOR,
 	EVENT_MOUSEWHEEL,
-	EVENT_LBUTTONDBLCLK,
-	EVENT_RBUTTONDBLCLK,
-	EVENT_MBUTTONDBLCLK,
 } event_t;
 
 struct key_info {
@@ -159,6 +152,11 @@ typedef union event_info {
 	struct mouse_wheel_info mwi;
 } EventInfo;
 
+typedef struct event {
+	event_t type;
+	EventInfo info;
+} Event;
+
 struct view;
 
 typedef int (*EventProc)(struct view*, event_t, EventInfo*);
@@ -177,6 +175,7 @@ typedef enum type {
 
 typedef enum {
 	INSTR_EVENT,
+	INSTR_GROUP,
 	INSTR_IF,
 	INSTR_INVOKE,
 	INSTR_LOCAL,
@@ -194,6 +193,7 @@ struct property;
 
 typedef struct parameter {
 	type_t type;
+	char class[256];
 	char name[256];
 } Parameter;
 
@@ -217,7 +217,7 @@ struct object_class {
 };
 
 struct value_object {
-	struct object_class *class;
+	char class[256];
 	void *data;
 };
 
@@ -242,10 +242,15 @@ struct instr_event {
 	EventInfo info;
 };
 
-struct instr_if {
-	struct instruction *condition;
+struct instr_group {
 	struct instruction *instructions;
 	Uint32 numInstructions;
+};
+
+struct instr_if {
+	struct instruction *condition;
+	struct instruction *iff;
+	struct instruction *els;
 };
 
 struct instr_invoke {
@@ -285,10 +290,11 @@ struct instr_variable {
 };
 
 typedef struct instruction {
-	type_t type;
 	instr_t instr;
+	type_t type;
 	union {
 		struct instr_event event;
+		struct instr_group group;
 		struct instr_if iff;
 		struct instr_invoke invoke;
 		struct instr_local local;

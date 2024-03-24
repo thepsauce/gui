@@ -1,13 +1,13 @@
 #include "gui.h"
 
 #define MAX_WORD 256
-#define PARSER_BUFFER 128
+#define PARSER_BUFFER 1024
 
 struct parser {
 	Union uni;
 	FILE *file;
 	/* circular buffer */
-	char buffer[1024];
+	char buffer[PARSER_BUFFER];
 	Uint32 iRead, iWrite;
 	long line;
 	int column;
@@ -24,8 +24,11 @@ struct parser {
 
 static void parser_Refresh(struct parser *parser)
 {
-	unsigned int nWritten;
+	Uint32 nWritten;
 
+	/* this check is needed because the following code expects at least
+	 * one character to be readable (not EOF)
+	 */
 	if (feof(parser->file)) {
 		return;
 	}
@@ -89,6 +92,28 @@ static int parser_SkipSpace(struct parser *parser)
 		}
 	} while (parser_NextChar(parser) != EOF);
 	return 0;
+}
+
+static Uint32 parser_LookAhead(struct parser *parser, char *buf, Uint32 nBuf)
+{
+	Uint32 l, i;
+
+	parser_SkipSpace(parser);
+
+	if (nBuf == 0 || parser->c == EOF ||
+			nBuf >= sizeof(parser->buffer) / 2) {
+		return 0;
+	}
+
+	buf[0] = parser->c;
+	for (l = 1, i = parser->iRead; l < nBuf; l++) {
+		if (i == parser->iWrite) {
+			break;
+		}
+		buf[l] = parser->buffer[i++];
+		i %= sizeof(parser->buffer);
+	}
+	return l;
 }
 
 static int parser_ReadWord(struct parser *parser)
@@ -407,10 +432,8 @@ static int parser_ReadObject(struct parser *parser)
 		return -1;
 	}
 	parser_SkipSpace(parser);
-	if (strcmp(parser->word, "null") == 0) {
-		parser->value.object.class = NULL;
-		parser->value.object.data = NULL;
-	}
+	strcpy(parser->value.object.class, parser->word);
+	parser->value.object.data = NULL;
 	return 0;
 }
 
@@ -486,7 +509,10 @@ static int parser_ReadEvent(struct parser *parser)
 
 static int parser_ReadIf(struct parser *parser)
 {
+	char text[5];
+	Instruction *iff;
 	Instruction *cond;
+	Instruction *els = NULL;
 
 	if (parser_ReadInstruction(parser) < 0) {
 		return -1;
@@ -496,15 +522,37 @@ static int parser_ReadIf(struct parser *parser)
 		return -1;
 	}
 	*cond = parser->instruction;
+
 	parser_SkipSpace(parser);
-	if (parser_ReadBody(parser) < 0) {
+	if (parser_ReadInstruction(parser) < 0) {
 		return -1;
 	}
-	parser_SkipSpace(parser);
+	iff = union_Alloc(union_Default(), sizeof(*iff));
+	if (iff == NULL) {
+		return -1;
+	}
+	*iff = parser->instruction;
+
+	if (parser_LookAhead(parser, text, 5) == 5) {
+		if (memcmp(text, "else", 4) == 0 &&
+				!isalnum(text[4]) && text[4] != '_') {
+			parser_ReadWord(parser);
+			parser_SkipSpace(parser);
+			if (parser_ReadInstruction(parser) < 0) {
+				return -1;
+			}
+			els = union_Alloc(union_Default(),
+					sizeof(*els));
+			if (els == NULL) {
+				return -1;
+			}
+			*els = parser->instruction;
+		}
+	}
 	parser->instruction.instr = INSTR_IF;
 	parser->instruction.iff.condition = cond;
-	parser->instruction.iff.instructions = parser->instructions;
-	parser->instruction.iff.numInstructions = parser->numInstructions;
+	parser->instruction.iff.iff = iff;
+	parser->instruction.iff.els = els;
 	return 0;
 }
 
@@ -652,6 +700,43 @@ static int parser_ReadValue(struct parser *parser, type_t type)
 	return reads[type](parser);
 }
 
+static int parser_ResolveConstant(struct parser *parser)
+{
+	static const struct {
+		const char *word;
+		type_t type;
+		Value value;
+	} constants[] = {
+		{ "EVENT_CREATE", TYPE_INTEGER, { .i = EVENT_CREATE } },
+		{ "EVENT_DESTROY", TYPE_INTEGER, { .i = EVENT_DESTROY } },
+		{ "EVENT_TIMER", TYPE_INTEGER, { .i = EVENT_TIMER } },
+		{ "EVENT_SETFOCUS", TYPE_INTEGER, { .i = EVENT_SETFOCUS } },
+		{ "EVENT_KILLFOCUS", TYPE_INTEGER, { .i = EVENT_KILLFOCUS } },
+		{ "EVENT_PAINT", TYPE_INTEGER, { .i = EVENT_PAINT } },
+		{ "EVENT_SIZE", TYPE_INTEGER, { .i = EVENT_SIZE } },
+		{ "EVENT_KEYDOWN", TYPE_INTEGER, { .i = EVENT_KEYDOWN } },
+		{ "EVENT_CHAR", TYPE_INTEGER, { .i = EVENT_CHAR } },
+		{ "EVENT_KEYUP", TYPE_INTEGER, { .i = EVENT_KEYUP } },
+		{ "EVENT_BUTTONDOWN", TYPE_INTEGER, { .i = EVENT_BUTTONDOWN } },
+		{ "EVENT_BUTTONUP", TYPE_INTEGER, { .i = EVENT_BUTTONUP } },
+		{ "EVENT_MOUSEMOVE", TYPE_INTEGER, { .i = EVENT_MOUSEMOVE } },
+		{ "EVENT_MOUSEWHEEL", TYPE_INTEGER, { .i = EVENT_MOUSEWHEEL } },
+
+		{ "BUTTON_LEFT", TYPE_INTEGER, { .i = SDL_BUTTON_LEFT } },
+		{ "BUTTON_MIDDLE", TYPE_INTEGER, { .i = SDL_BUTTON_MIDDLE } },
+		{ "BUTTON_RIGHT", TYPE_INTEGER, { .i = SDL_BUTTON_RIGHT } },
+	};
+	for (Uint32 i = 0; i < ARRLEN(constants); i++) {
+		if (strcmp(constants[i].word, parser->word) == 0) {
+			printf("%s %u\n", parser->word, constants[i].type);
+			parser->instruction.type = constants[i].type;
+			parser->instruction.value.value = constants[i].value;
+			return 0;
+		}
+	}
+	return -1;
+}
+
 static int parser_ReadInstruction(struct parser *parser)
 {
 	static const struct {
@@ -668,6 +753,16 @@ static int parser_ReadInstruction(struct parser *parser)
 		{ "trigger", parser_ReadTrigger },
 	};
 
+	if (parser->c == '{') {
+		if (parser_ReadBody(parser) < 0) {
+			return -1;
+		}
+		parser->instruction.instr = INSTR_GROUP;
+		parser->instruction.group.instructions = parser->instructions;
+		parser->instruction.group.numInstructions =
+			parser->numInstructions;
+		return 0;
+	}
 	if (parser_ReadWord(parser) < 0) {
 		return -1;
 	}
@@ -680,6 +775,16 @@ static int parser_ReadInstruction(struct parser *parser)
 		parser->instruction.type = type;
 		parser->instruction.instr = INSTR_VALUE;
 		parser->instruction.value.value = parser->value;
+		return 0;
+	}
+	if (strcmp(parser->word, "const") == 0) {
+		if (parser_ReadWord(parser) < 0) {
+			return -1;
+		}
+		if (parser_ResolveConstant(parser) < 0) {
+			return -1;
+		}
+		parser->instruction.instr = INSTR_VALUE;
 		return 0;
 	}
 	for (size_t i = 0; i < ARRLEN(keywords); i++) {
@@ -703,7 +808,7 @@ static int parser_ReadFunction(struct parser *parser)
 {
 	Function *func;
 	type_t type;
-	Parameter *params = NULL, *newParams;
+	Parameter p, *params = NULL, *newParams;
 	Uint32 numParams = 0;
 
 	func = union_Alloc(union_Default(), sizeof(*func));
@@ -721,6 +826,13 @@ static int parser_ReadFunction(struct parser *parser)
 		if (type == TYPE_NULL) {
 			return -1;
 		}
+		if (type == TYPE_OBJECT) {
+			parser_SkipSpace(parser);
+			if (parser_ReadWord(parser) < 0) {
+				return -1;
+			}
+			strcpy(p.class, parser->word);
+		}
 		/* parameter name */
 		parser_SkipSpace(parser);
 		if (parser_ReadWord(parser) < 0) {
@@ -733,9 +845,9 @@ static int parser_ReadFunction(struct parser *parser)
 			return -1;
 		}
 		params = newParams;
-		params[numParams].type = type;
-		strcpy(params[numParams].name, parser->word);
-		numParams++;
+		p.type = type;
+		strcpy(p.name, parser->word);
+		params[numParams++] = p;
 		parser_SkipSpace(parser);
 		if (parser->c != ',' && parser->c != '{') {
 			return -1;

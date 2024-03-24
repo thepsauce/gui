@@ -10,6 +10,13 @@ Button:
 	.is_pressed = bool false
 	.circular = bool true
 	.font = font default
+	.obj = object Event
+
+	.smth = function {
+		set obj = new Event
+		set obj = new Event
+	}
+
 	.init = function {
 		print(string "Init\n")
 	}
@@ -36,19 +43,11 @@ Button:
 			} else {
 				set is_hovered = bool false
 			}
-		} else if equals(GetType(e), const EVENT_MOUSEDOWN) {
+		} else if equals(GetType(e), const EVENT_BUTTONDOWN) {
 			if equals(GetButton(e), const BUTTON_LEFT) {
 				set is_pressed = is_hovered
 			}
+		} else if equals(GetType(e), const EVENT_BUTTONUP) {
+			set is_pressed = bool false
 		}
 	}
-
-
-
-
-
-
-
-
-
-

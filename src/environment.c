@@ -3,10 +3,22 @@
 struct object_function rect_class_functions[] = {
 };
 
+struct object_class event_class = {
+	"Event",
+	sizeof(struct event),
+	NULL
+};
+
+struct object_class point_class = {
+	"Point",
+	sizeof(Sint32) * 2,
+	&event_class
+};
+
 struct object_class rect_class = {
 	"Rect",
 	sizeof(Sint32) * 4,
-	NULL
+	&point_class
 };
 
 struct object_class view_class = {
@@ -16,13 +28,18 @@ struct object_class view_class = {
 };
 
 static struct environment {
-	Union *uni;
 	struct object_class *class;
 	Label *label; /* first label in the linked list */
 	Label *cur; /* selected label */
 	View *view; /* current view */
 	Property *stack;
 	Uint32 numStack;
+	struct memo {
+		bool inUse;
+		Uint32 size;
+		void *sys;
+	} *objects;
+	Uint32 numObjects;
 } environment = {
 	.class = &view_class
 };
@@ -42,6 +59,73 @@ static struct object_class *FindClass(const char *name)
 	for (class = environment.class; class != NULL; class = class->next) {
 		if (strcmp(class->name, name) == 0) {
 			return class;
+		}
+	}
+	return NULL;
+}
+
+static struct memo *_AllocObject(Uint32 size)
+{
+	struct memo o, *newObjects, *po;
+	void *data;
+
+	newObjects = union_Realloc(union_Default(), environment.objects,
+			sizeof(*newObjects) * (environment.numObjects + 1));
+	if (newObjects == NULL) {
+		return NULL;
+	}
+	environment.objects = newObjects;
+
+	data = union_Alloc(union_Default(), size);
+	if (data == NULL) {
+		return NULL;
+	}
+	o.inUse = false;
+	o.size = size;
+	o.sys = data;
+	po = &environment.objects[environment.numObjects];
+	*po = o;
+	return po;
+}
+
+static void *AllocObject(const char *class)
+{
+	struct object_class *c;
+
+	c = FindClass(class);
+	if (c == NULL) {
+		return NULL;
+	}
+
+	struct memo *const o = _AllocObject(c->size);
+	if (o == NULL) {
+		return NULL;
+	}
+	return o->sys;
+}
+
+static struct memo *LocateObject(void *sys)
+{
+	for (Uint32 i = 0; i < environment.numObjects; i++) {
+		if (environment.objects[i].sys == sys) {
+			return &environment.objects[i];
+		}
+	}
+	return NULL;
+}
+
+static void *DuplicateObject(void *sys)
+{
+	struct memo *dup;
+
+	for (Uint32 i = 0; i < environment.numObjects; i++) {
+		if (environment.objects[i].sys == sys) {
+			dup = _AllocObject(environment.objects[i].size);
+			if (dup == NULL) {
+				return NULL;
+			}
+			memcpy(dup->sys, sys, dup->size);
+			return dup->sys;
 		}
 	}
 	return NULL;
@@ -108,12 +192,14 @@ static Property *SearchVariable(const char *name)
 static int StandardProc(View *view, event_t event, EventInfo *info)
 {
 	Property *prop;
+	Event e;
+	Instruction i;
 
 	(void) info;
+	environment.cur = view->label;
+	environment.view = view;
 	switch (event) {
 	case EVENT_CREATE:
-		environment.cur = view->label;
-		environment.view = view;
 		prop = SearchVariable("init");
 		if (prop == NULL || prop->type != TYPE_FUNCTION) {
 			break;
@@ -121,8 +207,6 @@ static int StandardProc(View *view, event_t event, EventInfo *info)
 		environment_ExecuteFunction(prop->value.func, NULL, 0, prop);
 		break;
 	case EVENT_PAINT:
-		environment.cur = view->label;
-		environment.view = view;
 		prop = SearchVariable("draw");
 		if (prop == NULL || prop->type != TYPE_FUNCTION) {
 			break;
@@ -130,6 +214,19 @@ static int StandardProc(View *view, event_t event, EventInfo *info)
 		environment_ExecuteFunction(prop->value.func, NULL, 0, prop);
 		break;
 	default:
+		prop = SearchVariable("event");
+		if (prop == NULL || prop->type != TYPE_FUNCTION) {
+			break;
+		}
+		e.type = event;
+		e.info = *info;
+		i.instr = INSTR_VALUE;
+		i.type = TYPE_OBJECT;
+		strcpy(i.value.value.object.class, "Event");
+		i.value.value.object.data = &e;
+		if (environment_ExecuteFunction(prop->value.func, &i, 1, prop) < 0) {
+		}
+		break;
 	}
 	return 0;
 }
@@ -162,16 +259,19 @@ int environment_ExecuteFunction(Function *func,
 	const Uint32 oldNumStack = environment.numStack;
 
 	for (Uint32 i = 0; i < numArgs; i++) {
-		if (EvaluateInstruction(&args[i],
-				&environment.stack[environment.numStack]) < 0) {
+		Property *const s = &environment.stack[environment.numStack];
+		if (EvaluateInstruction(&args[i], s) < 0) {
 			return -1;
 		}
-		if (func->params[i].type !=
-				environment.stack[environment.numStack].type) {
+		if (func->params[i].type != s->type) {
 			return -1;
 		}
-		strcpy(environment.stack[environment.numStack].name,
-				func->params[i].name);
+		if (func->params[i].type == TYPE_OBJECT &&
+				strcmp(func->params[i].class,
+					s->value.object.class) != 0) {
+			return -1;
+		}
+		strcpy(s->name, func->params[i].name);
 		environment.numStack++;
 	}
 	r = ExecuteInstructions(func->instructions, func->numInstructions,
@@ -194,6 +294,7 @@ static int EvaluateInstruction(Instruction *instr, Property *prop)
 
 	switch (instr->instr) {
 	case INSTR_EVENT:
+	case INSTR_GROUP:
 	case INSTR_IF:
 	case INSTR_LOCAL:
 	case INSTR_RETURN:
@@ -222,12 +323,12 @@ static int EvaluateInstruction(Instruction *instr, Property *prop)
 		}
 		memset(data, 0, class->size);
 		prop->type = TYPE_OBJECT;
-		prop->value.object.class = class;
+		strcpy(prop->value.object.class, instr->new.class);
 		prop->value.object.data = data;
 		break;
 	case INSTR_THIS:
 		prop->type = TYPE_OBJECT;
-		prop->value.object.class = FindClass("View");
+		strcpy(prop->value.object.class, "View");
 		prop->value.object.data = environment.view;
 		break;
 	case INSTR_VALUE:
@@ -248,6 +349,7 @@ static int EvaluateInstruction(Instruction *instr, Property *prop)
 static int ExecuteInstruction(Instruction *instr, Property *prop)
 {
 	Property *var;
+	struct memo *o;
 	bool b;
 	Property *newStack;
 
@@ -260,6 +362,9 @@ static int ExecuteInstruction(Instruction *instr, Property *prop)
 	case INSTR_EVENT:
 		printf("event: %u\n", instr->event.event);
 		break;
+	case INSTR_GROUP:
+		return ExecuteInstructions(instr->group.instructions,
+				instr->group.numInstructions, prop);
 	case INSTR_IF:
 		if (EvaluateInstruction(instr->iff.condition, prop) < 0) {
 			return -1;
@@ -272,8 +377,9 @@ static int ExecuteInstruction(Instruction *instr, Property *prop)
 			return -1;
 		}
 		if (b) {
-			return ExecuteInstructions(instr->iff.instructions,
-					instr->iff.numInstructions, prop);
+			return ExecuteInstruction(instr->iff.iff, prop);
+		} else if (instr->iff.els != NULL) {
+			return ExecuteInstruction(instr->iff.els, prop);
 		}
 		break;
 	case INSTR_LOCAL:
@@ -304,6 +410,28 @@ static int ExecuteInstruction(Instruction *instr, Property *prop)
 		}
 		if (prop->type != var->type) {
 			return -1;
+		}
+		if (prop->type == TYPE_OBJECT) {
+			if (var->value.object.data != NULL) {
+				o = LocateObject(var->value.object.data);
+				if (o == NULL) {
+					return -1;
+				}
+				o->inUse = false;
+			}
+			if (prop->value.object.data != NULL) {
+				o = LocateObject(prop->value.object.data);
+				if (o == NULL) {
+					return -1;
+				}
+				if (o->inUse) {
+					prop->value.object.data =
+						DuplicateObject(o);
+					if (prop->value.object.data == NULL) {
+						return -1;
+					}
+				}
+			}
 		}
 		var->value = prop->value;
 		break;
@@ -437,13 +565,9 @@ static int SystemPrint(Property *args, Uint32 numArgs, Property *result)
 			fprintf(fp, "%ld", prop->value.i);
 			break;
 		case TYPE_OBJECT:
-			if (prop->value.object.class == NULL) {
-				fprintf(fp, "null");
-			} else {
-				fprintf(fp, "%s %p",
-					prop->value.object.class->name,
-					prop->value.object.data);
-			}
+			fprintf(fp, "%s %p",
+				prop->value.object.class,
+				prop->value.object.data);
 			break;
 		case TYPE_STRING:
 			fprintf(fp, "%.*s", prop->value.s.length, prop->value.s.data);
@@ -484,6 +608,29 @@ static int SystemSum(Property *args, Uint32 numArgs, Property *result)
 	return 0;
 }
 
+static bool IsPropertyObject(const Property *prop, const char *class)
+{
+	if (prop->type != TYPE_OBJECT) {
+		return false;
+	}
+	return strcmp(prop->value.object.class, class) == 0;
+}
+
+static int SystemContains(Property *args, Uint32 numArgs, Property *result)
+{
+	if (numArgs != 2) {
+		return -1;
+	}
+	if (!IsPropertyObject(&args[0], "Rect") ||
+			!IsPropertyObject(&args[1], "Point")) {
+		return -1;
+	}
+	result->type = TYPE_BOOL;
+	result->value.b = rect_Contains(args[0].value.object.data,
+			args[1].value.object.data);
+	return 0;
+}
+
 static int SystemSetDrawColor(Property *args, Uint32 numArgs, Property *result)
 {
 	Property prop;
@@ -499,14 +646,6 @@ static int SystemSetDrawColor(Property *args, Uint32 numArgs, Property *result)
 	renderer_SetDrawColor(renderer_Default(), prop.value.color);
 	(void) result;
 	return 0;
-}
-
-static bool IsPropertyObject(const Property *prop, const char *class)
-{
-	if (prop->type != TYPE_OBJECT) {
-		return false;
-	}
-	return strcmp(prop->value.object.class->name, class) == 0;
 }
 
 static int args_GetRect(Property *args, Uint32 numArgs, Rect *r)
@@ -558,8 +697,12 @@ static int SystemGetRect(Property *args, Uint32 numArgs, Property *result)
 
 	View *const view = args[0].value.object.data;
 	result->type = TYPE_OBJECT;
-	result->value.object.class = FindClass("Rect");
-	result->value.object.data = &view->rect;
+	strcpy(result->value.object.class, "Rect");
+	result->value.object.data = AllocObject(result->value.object.class);
+	if (result->value.object.data == NULL) {
+		return -1;
+	}
+	memcpy(result->value.object.data, &view->rect, sizeof(view->rect));
 	return 0;
 }
 
@@ -586,6 +729,53 @@ static int SystemSetRect(Property *args, Uint32 numArgs, Property *result)
 	return 0;
 }
 
+static int SystemGetType(Property *args, Uint32 numArgs, Property *result)
+{
+	Event *e;
+
+	if (numArgs == 0 || !IsPropertyObject(&args[0], "Event")) {
+		return -1;
+	}
+	e = args[0].value.object.data;
+	result->type = TYPE_INTEGER;
+	result->value.i = e->type;
+	return 0;
+}
+
+static int SystemGetPos(Property *args, Uint32 numArgs, Property *result)
+{
+	Event *e;
+	Point *p;
+
+	if (numArgs == 0 || !IsPropertyObject(&args[0], "Event")) {
+		return -1;
+	}
+	e = args[0].value.object.data;
+	result->type = TYPE_OBJECT;
+	strcpy(result->value.object.class, "Point");
+	p = AllocObject(result->value.object.class);
+	if (p == NULL) {
+		return -1;
+	}
+	p->x = e->info.mi.x;
+	p->y = e->info.mi.y;
+	result->value.object.data = p;
+	return 0;
+}
+
+static int SystemGetButton(Property *args, Uint32 numArgs, Property *result)
+{
+	Event *e;
+
+	if (numArgs == 0 || !IsPropertyObject(&args[0], "Event")) {
+		return -1;
+	}
+	e = args[0].value.object.data;
+	result->type = TYPE_INTEGER;
+	result->value.i = e->info.mi.button;
+	return 0;
+}
+
 static int ExecuteSystem(const char *call,
 		Instruction *args, Uint32 numArgs, Property *result)
 {
@@ -597,10 +787,14 @@ static int ExecuteSystem(const char *call,
 		{ "equals", SystemEquals },
 		{ "print", SystemPrint },
 		{ "sum", SystemSum },
+		{ "Contains", SystemContains },
 		{ "SetDrawColor", SystemSetDrawColor },
 		{ "FillRect", SystemFillRect },
 		{ "GetRect", SystemGetRect },
 		{ "SetRect", SystemSetRect },
+		{ "GetType", SystemGetType },
+		{ "GetPos", SystemGetPos },
+		{ "GetButton", SystemGetButton },
 	};
 
 	const struct system_function *sys = NULL;

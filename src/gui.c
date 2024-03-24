@@ -66,14 +66,14 @@ static int TranslateEvent(const SDL_Event *event,
 		info->mmi.dy = event->motion.yrel;
 		break;
 	case SDL_MOUSEBUTTONDOWN:
-		*type = EVENT_LBUTTONDOWN;
+		*type = EVENT_BUTTONDOWN;
 		info->mi.button = event->button.button;
 		info->mi.clicks = event->button.clicks;
 		info->mi.x = event->button.x;
 		info->mi.y = event->button.y;
 		break;
 	case SDL_MOUSEBUTTONUP:
-		*type = EVENT_LBUTTONUP;
+		*type = EVENT_BUTTONUP;
 		info->mi.button = event->button.button;
 		info->mi.clicks = event->button.clicks;
 		info->mi.x = event->button.x;

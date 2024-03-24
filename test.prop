@@ -22,10 +22,15 @@ Button:
 		replace with a property event class ;
 		event keydown A
 	}
+	.event = function object e {
+		print(GetType(e), string " ")
+	}
 	.s = function int x, int y {
 		local l = int 3
 		if equals(x, l) {
 			set x = int 4
+		} else if equals(x, int 9) {
+			set x = int 444
 		}
 		return sum(x, y, x, y)
 	}
@@ -44,6 +49,7 @@ Button:
 	.fi = sum(a, b, f1, f2, sum(a, b))
 	.g = s(int 12, int 55)
 	.h = s(int 3, int 12)
+	.p = s(int 9, int 8)
 	.init = function {
-		print(fi, string " ", g, string " ", h, string "\n")
+		print(fi, string " ", g, string " ", h, string " ", p, string "\n")
 	}
