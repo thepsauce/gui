@@ -8,6 +8,8 @@
 #include <string.h>
 #include <time.h>
 
+#define MAX_WORD 256
+
 typedef size_t Size;
 
 #define ARRLEN(a) (sizeof(a)/sizeof*(a))
@@ -197,7 +199,7 @@ struct object_class;
 typedef struct parameter {
 	type_t type;
 	struct object_class *class;
-	char name[256];
+	char name[MAX_WORD];
 } Parameter;
 
 typedef struct function {
@@ -208,7 +210,7 @@ typedef struct function {
 } Function;
 
 struct object_class {
-	char name[256];
+	char name[MAX_WORD];
 	void *(*constructor)(struct property *args, Uint32 numArgs);
 	Size size;
 };
@@ -253,13 +255,13 @@ struct instr_if {
 };
 
 struct instr_invoke {
-	char name[256];
+	char name[MAX_WORD];
 	struct instruction *args;
 	Uint32 numArgs;
 };
 
 struct instr_local {
-	char name[256];
+	char name[MAX_WORD];
 	struct instruction *value;
 };
 
@@ -274,12 +276,12 @@ struct instr_return {
 };
 
 struct instr_set {
-	char variable[256];
+	char variable[MAX_WORD];
 	struct instruction *value;
 };
 
 struct instr_trigger {
-	char name[256];
+	char name[MAX_WORD];
 };
 
 struct instr_value {
@@ -287,7 +289,7 @@ struct instr_value {
 };
 
 struct instr_variable {
-	char name[256];
+	char name[MAX_WORD];
 };
 
 typedef struct instruction {
@@ -309,24 +311,24 @@ typedef struct instruction {
 } Instruction;
 
 typedef struct raw_property {
-	char name[256];
+	char name[MAX_WORD];
 	Instruction instruction;
 } RawProperty;
 
 typedef struct property_wrapper {
-	char label[256];
+	char label[MAX_WORD];
 	RawProperty *properties;
 	Uint32 numProperties;
 } RawWrapper;
 
 typedef struct property {
 	type_t type;
-	char name[256];
+	char name[MAX_WORD];
 	Value value;
 } Property;
 
 typedef struct label {
-	char name[256];
+	char name[MAX_WORD];
 	Property *properties;
 	Uint32 numProperties;
 	EventProc proc;

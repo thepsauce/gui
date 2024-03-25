@@ -39,19 +39,19 @@ Button:
 		local c = color 0
 		if is_pressed {
 			if is_hovered {
-				set c = press
+				c = press
 			} else {
-				set c = away
+				c = away
 			}
 		} else {
 			if is_hovered {
-				set c = hover
+				c = hover
 			} else {
-				set c = background
+				c = background
 			}
 		}
 		if has_spawned {
-			set c = rand(int 0, int 1000000)
+			c = rand(0, 1000000)
 		}
 		SetDrawColor(c)
 		FillRect(GetRect(this))
@@ -59,22 +59,24 @@ Button:
 	.event = function object Event e {
 		if equals(GetType(e), const EVENT_MOUSEMOVE) {
 			if Contains(GetRect(this), GetPos(e)) {
-				set is_hovered = bool true
+				is_hovered = bool true
 			} else {
-				set is_hovered = bool false
+				is_hovered = bool false
 			}
 		} else if equals(GetType(e), const EVENT_BUTTONDOWN) {
 			if equals(GetButton(e), const BUTTON_LEFT) {
-				set is_pressed = is_hovered
+				; testing property functions ;
+				SetProperty(this, "is_pressed", GetProperty(this, "is_hovered"))
+				;is_pressed = is_hovered;
 			}
 		} else if equals(GetType(e), const EVENT_BUTTONUP) {
 			if and(is_pressed, is_hovered, not(has_spawned)) {
-				local b = new View(string "Button")
-				SetRect(b, rand(int 0, GetWindowWidth()),
-					rand(int 0, GetWindowHeight()), int 30, int 30)
+				local b = new View("Button")
+				SetRect(b, rand(0, GetWindowWidth()),
+					rand(0, GetWindowHeight()), 30, 30)
 				SetParent(b, GetParent(this))
-				set has_spawned = bool true
+				has_spawned = bool true
 			}
-			set is_pressed = bool false
+			is_pressed = bool false
 		}
 	}

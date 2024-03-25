@@ -34,6 +34,18 @@ static int EvaluateInstruction(Instruction *instr, Property *prop);
 static int ExecuteInstructions(Instruction *instrs,
 		Uint32 num, Property *prop);
 
+static char *WordTerminate(struct value_string *s)
+{
+	static char word[MAX_WORD];
+
+	if (s->length >= MAX_WORD) {
+		return NULL;
+	}
+	memcpy(word, s->data, s->length);
+	word[s->length] = '\0';
+	return word;
+}
+
 struct object_class *environment_FindClass(const char *name)
 {
 	for (Uint32 i = 0; i < ARRLEN(object_classes); i++) {
@@ -145,10 +157,32 @@ static int CastProperty(const Property *in, type_t type, Property *out)
 	return 0;
 }
 
-static Property *SearchVariable(const char *name, Value **pValue)
+static Property *_SearchVariable(View *view, const char *name, Value **pValue)
 {
 	Label *l;
 
+	if (view == NULL) {
+		l = environment.cur;
+	} else {
+		l = view->label;
+	}
+	for (Uint32 i = 0; i < l->numProperties; i++) {
+		if (strcmp(l->properties[i].name, name) == 0) {
+			if (pValue != NULL) {
+				if (view == NULL) {
+					*pValue = NULL;
+				} else {
+					*pValue = &view->values[i];
+				}
+			}
+			return &l->properties[i];
+		}
+	}
+	return NULL;
+}
+
+static Property *SearchVariable(const char *name, Value **pValue)
+{
 	for (Uint32 i = environment.numStack; i > 0; ) {
 		i--;
 		if (strcmp(environment.stack[i].name, name) == 0) {
@@ -158,25 +192,7 @@ static Property *SearchVariable(const char *name, Value **pValue)
 			return &environment.stack[i];
 		}
 	}
-
-	if (environment.view == NULL) {
-		l = environment.cur;
-	} else {
-		l = environment.view->label;
-	}
-	for (Uint32 i = 0; i < l->numProperties; i++) {
-		if (strcmp(l->properties[i].name, name) == 0) {
-			if (pValue != NULL) {
-				if (environment.view == NULL) {
-					*pValue = NULL;
-				} else {
-					*pValue = &environment.view->values[i];
-				}
-			}
-			return &l->properties[i];
-		}
-	}
-	return NULL;
+	return _SearchVariable(environment.view, name, pValue);
 }
 
 static int StandardProc(View *view, event_t event, EventInfo *info)
@@ -347,12 +363,13 @@ static void *view_constructor(Property *args, Uint32 numArgs)
 {
 	View *v;
 	Rect r;
-	char class[256];
+	char *class;
 
 	if (numArgs == 0 || args[0].type != TYPE_STRING) {
 		return NULL;
 	}
-	if (args[0].value.s.length >= sizeof(class)) {
+	class = WordTerminate(&args[0].value.s);
+	if (class == NULL) {
 		return NULL;
 	}
 	if (numArgs > 1) {
@@ -365,8 +382,6 @@ static void *view_constructor(Property *args, Uint32 numArgs)
 		r.w = 0;
 		r.h = 0;
 	}
-	memcpy(class, args[0].value.s.data, args[0].value.s.length);
-	class[args[0].value.s.length] = '\0';
 	v = view_Create(class, &r);
 	if (v == NULL) {
 		return NULL;
@@ -930,17 +945,56 @@ static int SystemSetParent(Property *args, Uint32 numArgs, Property *result)
 	return 0;
 }
 
+static int SystemGetProperty(Property *args, Uint32 numArgs, Property *result)
+{
+	View *v;
+	char *s;
+	Property *prop;
+	Value *pValue;
+
+	if (numArgs != 2 || !IsPropertyObject(&args[0], "View") ||
+			args[1].type != TYPE_STRING) {
+		return -1;
+	}
+	v = args[0].value.object.data;
+	s = WordTerminate(&args[1].value.s);
+	if (s == NULL) {
+		return -1;
+	}
+	prop = _SearchVariable(v, s, &pValue);
+	if (prop == NULL) {
+		return -1;
+	}
+	result->type = prop->type;
+	result->value = *pValue;
+	return 0;
+}
+
 static int SystemSetProperty(Property *args, Uint32 numArgs, Property *result)
 {
 	View *v;
+	char *s;
+	Value *pValue;
+	Property *prop;
+	Property out;
 
 	if (numArgs != 3 || !IsPropertyObject(&args[0], "View") ||
 			args[1].type != TYPE_STRING) {
 		return -1;
 	}
 	v = args[0].value.object.data;
-	/* TODO: implement this when the id system is in place */
-	(void) v;
+	s = WordTerminate(&args[1].value.s);
+	if (s == NULL) {
+		return -1;
+	}
+	prop = _SearchVariable(v, s, &pValue);
+	if (prop == NULL) {
+		return -1;
+	}
+	if (CastProperty(&args[2], prop->type, &out) < 0) {
+		return -1;
+	}
+	*pValue = out.value;
 	(void) result;
 	return 0;
 }
@@ -1093,14 +1147,15 @@ static int ExecuteSystem(const char *call,
 		{ "GetObject", SystemGetObject },
 		{ "GetParent", SystemGetParent },
 		{ "GetPos", SystemGetPos },
+		{ "GetProperty", SystemGetProperty },
 		{ "GetRect", SystemGetRect },
 		{ "GetType", SystemGetType },
+		{ "GetWindowHeight", SystemGetWindowHeight },
+		{ "GetWindowWidth", SystemGetWindowWidth },
 		{ "SetDrawColor", SystemSetDrawColor },
 		{ "SetParent", SystemSetParent },
 		{ "SetProperty", SystemSetProperty },
 		{ "SetRect", SystemSetRect },
-		{ "GetWindowWidth", SystemGetWindowWidth },
-		{ "GetWindowHeight", SystemGetWindowHeight },
 	};
 
 	const struct system_function *sys = NULL;

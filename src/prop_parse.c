@@ -1,6 +1,5 @@
 #include "gui.h"
 
-#define MAX_WORD 256
 #define PARSER_BUFFER 1024
 
 struct parser {
@@ -15,7 +14,6 @@ struct parser {
 	char word[MAX_WORD];
 	int nWord;
 	char label[MAX_WORD];
-	Value value;
 	RawProperty property;
 	Instruction instruction;
 	Instruction *instructions;
@@ -197,7 +195,7 @@ static int parser_ReadString(struct parser *parser)
 		s.data[s.length++] = c;
 	}
 
-	parser->value.s = s;
+	parser->instruction.value.value.s = s;
 	return 0;
 }
 
@@ -230,11 +228,11 @@ static int parser_ReadBool(struct parser *parser)
 		return -1;
 	}
 	if (strcmp(parser->word, "true") == 0) {
-		parser->value.b = true;
+		parser->instruction.value.value.b = true;
 		return 0;
 	}
 	if (strcmp(parser->word, "false") == 0) {
-		parser->value.b = false;
+		parser->instruction.value.value.b = false;
 		return 0;
 	}
 	return -1;
@@ -246,7 +244,7 @@ static int parser_ReadFont(struct parser *parser)
 		return -1;
 	}
 	if (!strcmp(parser->word, "default")) {
-		parser->value.font = NULL;
+		parser->instruction.value.value.font = NULL;
 		return 0;
 	}
 	return -1;
@@ -300,7 +298,7 @@ static int parser_ReadInt(struct parser *parser)
 			num += parser->c - '0';
 		} while (parser_NextChar(parser), isdigit(parser->c));
 	}
-	parser->value.i = sign * num;
+	parser->instruction.value.value.i = sign * num;
 	return 0;
 }
 
@@ -378,7 +376,7 @@ static int parser_ReadFloat(struct parser *parser)
 			front *= 10;
 		}
 	}
-	parser->value.f = sign * (front + back);
+	parser->instruction.value.value.f = sign * (front + back);
 	return 0;
 }
 
@@ -415,7 +413,7 @@ static int parser_ReadColor(struct parser *parser)
 		}
 		for (size_t i = 0; i < ARRLEN(colors); i++) {
 			if (strcmp(colors[i].name, parser->word) == 0) {
-				parser->value.color = colors[i].color;
+				parser->instruction.value.value.color = colors[i].color;
 				return 0;
 			}
 		}
@@ -429,11 +427,11 @@ static int parser_ReadObject(struct parser *parser)
 		return -1;
 	}
 	parser_SkipSpace(parser);
-	parser->value.object.class = environment_FindClass(parser->word);
-	if (parser->value.object.class == NULL) {
+	parser->instruction.value.value.object.class = environment_FindClass(parser->word);
+	if (parser->instruction.value.value.object.class == NULL) {
 		return -1;
 	}
-	parser->value.object.data = NULL;
+	parser->instruction.value.value.object.data = NULL;
 	return 0;
 }
 
@@ -467,6 +465,9 @@ static int parser_ReadBody(struct parser *parser)
 	return 0;
 }
 
+/* TODO: maybe get rid of all this event stuff and make system functions
+ * instead
+ */
 static int parser_ReadKeyDown(struct parser *parser)
 {
 	struct key_info ki;
@@ -596,7 +597,7 @@ static int parser_ReadInvoke(struct parser *parser)
 	return 0;
 }
 
-static int parser_ReadLocalOrSet(struct parser *parser, instr_t instr)
+static int parser_ReadLocal(struct parser *parser)
 {
 	Instruction *pInstr;
 
@@ -622,14 +623,9 @@ static int parser_ReadLocalOrSet(struct parser *parser, instr_t instr)
 	}
 	*pInstr = parser->instruction;
 	parser->instruction = instruction;
-	parser->instruction.instr = instr;
+	parser->instruction.instr = INSTR_LOCAL;
 	parser->instruction.set.value = pInstr;
 	return 0;
-}
-
-static int parser_ReadLocal(struct parser *parser)
-{
-	return parser_ReadLocalOrSet(parser, INSTR_LOCAL);
 }
 
 static int parser_ReadNew(struct parser *parser)
@@ -696,11 +692,6 @@ static int parser_ReadReturn(struct parser *parser)
 	parser->instruction.instr = INSTR_RETURN;
 	parser->instruction.ret.value = instr;
 	return 0;
-}
-
-static int parser_ReadSet(struct parser *parser)
-{
-	return parser_ReadLocalOrSet(parser, INSTR_SET);
 }
 
 static int parser_ReadThis(struct parser *parser)
@@ -796,7 +787,6 @@ static int parser_ReadInstruction(struct parser *parser)
 		{ "local", parser_ReadLocal },
 		{ "new", parser_ReadNew },
 		{ "return", parser_ReadReturn },
-		{ "set", parser_ReadSet },
 		{ "this", parser_ReadThis },
 		{ "trigger", parser_ReadTrigger },
 	};
@@ -811,6 +801,26 @@ static int parser_ReadInstruction(struct parser *parser)
 			parser->numInstructions;
 		return 0;
 	}
+
+	/* implicit string type */
+	if (parser->c == '\"') {
+		if (parser_ReadString(parser) < 0) {
+			return -1;
+		}
+		parser->instruction.instr = INSTR_VALUE;
+		parser->instruction.type = TYPE_STRING;
+		return 0;
+	}
+
+	/* implicit int type */
+	if (isdigit(parser->c)) {
+		if (parser_ReadInt(parser) < 0) {
+			return -1;
+		}
+		parser->instruction.instr = INSTR_VALUE;
+		parser->instruction.type = TYPE_INTEGER;
+		return 0;
+	}
 	if (parser_ReadWord(parser) < 0) {
 		return -1;
 	}
@@ -822,7 +832,6 @@ static int parser_ReadInstruction(struct parser *parser)
 		}
 		parser->instruction.type = type;
 		parser->instruction.instr = INSTR_VALUE;
-		parser->instruction.value.value = parser->value;
 		return 0;
 	}
 	if (strcmp(parser->word, "const") == 0) {
@@ -837,14 +846,34 @@ static int parser_ReadInstruction(struct parser *parser)
 	}
 	for (size_t i = 0; i < ARRLEN(keywords); i++) {
 		if (strcmp(keywords[i].word, parser->word) == 0) {
-			keywords[i].read(parser);
-			return 0;
+			return keywords[i].read(parser);
 		}
 	}
 	if (parser->c == '(') {
 		parser_NextChar(parser); /* skip '(' */
 		parser_SkipSpace(parser);
 		return parser_ReadInvoke(parser);
+	}
+	if (parser->c == '=') {
+		Instruction *pInstr;
+		char var[MAX_WORD];
+
+		strcpy(var, parser->word);
+
+		parser_NextChar(parser); /* skip '=' */
+		parser_SkipSpace(parser);
+		if (parser_ReadInstruction(parser) < 0) {
+			return -1;
+		}
+		pInstr = union_Alloc(union_Default(), sizeof(*pInstr));
+		if (pInstr == NULL) {
+			return -1;
+		}
+		*pInstr = parser->instruction;
+		parser->instruction.instr = INSTR_SET;
+		strcpy(parser->instruction.set.variable, var);
+		parser->instruction.set.value = pInstr;
+		return 0;
 	}
 	/* assume a variable */
 	parser->instruction.instr = INSTR_VARIABLE;
@@ -916,7 +945,7 @@ static int parser_ReadFunction(struct parser *parser)
 	func->numParams = numParams;
 	func->instructions = parser->instructions;
 	func->numInstructions = parser->numInstructions;
-	parser->value.func = func;
+	parser->instruction.value.value.func = func;
 	return 0;
 }
 
