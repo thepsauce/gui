@@ -12,6 +12,22 @@ Renderer *renderer_Default(void)
 	return gui_renderer;
 }
 
+Sint32 gui_GetWindowWidth(void)
+{
+	int w, h;
+
+	SDL_GetWindowSize(gui_window, &w, &h);
+	return w;
+}
+
+Sint32 gui_GetWindowHeight(void)
+{
+	int w, h;
+
+	SDL_GetWindowSize(gui_window, &w, &h);
+	return h;
+}
+
 int gui_Init(Uint32 flags)
 {
 	(void) flags;

@@ -108,32 +108,32 @@ Uint32 view_GetColorProperty(View *view, const char *name)
 	return prop->color;
 }
 
-int view_SetParent(View *parent, View *child)
+int view_SetParent(View *view, View *parent)
 {
 	/* isolate the child from... */
 	/* ...previous parent */
-	if (child->parent != NULL && child->parent->child == child) {
-		child->parent->child = child->next;
+	if (view->parent != NULL && view->parent->child == view) {
+		view->parent->child = view->next;
 	}
-	child->parent = parent;
+	view->parent = parent;
 
 	/* ...previous siblings */
-	if (child->prev != NULL) {
-		child->prev->next = child->next;
+	if (view->prev != NULL) {
+		view->prev->next = view->next;
 	}
-	if (child->next != NULL) {
-		child->next->prev = child->prev;
+	if (view->next != NULL) {
+		view->next->prev = view->prev;
 	}
 
 	if (parent == NULL) {
 		return 0;
 	}
 	if (parent->child != NULL) {
-		parent->child->prev = child;
-		child->next = parent->child;
-		child->prev = parent->child;
+		parent->child->prev = view;
+		view->next = parent->child;
+		view->prev = parent->child;
 	}
-	parent->child = child;
+	parent->child = view;
 	return 0;
 }
 

@@ -33,6 +33,8 @@ typedef SDL_Point Point;
 #define GUI_INIT_CLASSES 0x01
 
 int gui_Init(Uint32 flags);
+Sint32 gui_GetWindowWidth(void);
+Sint32 gui_GetWindowHeight(void);
 int gui_Run(void);
 
 Renderer *renderer_Default(void);
@@ -190,10 +192,11 @@ typedef enum {
 
 struct instruction;
 struct property;
+struct object_class;
 
 typedef struct parameter {
 	type_t type;
-	char class[256];
+	struct object_class *class;
 	char name[256];
 } Parameter;
 
@@ -204,20 +207,16 @@ typedef struct function {
 	Uint32 numInstructions;
 } Function;
 
-struct object_function {
-	char name[256];
-	int (*func)(void *data, struct property *args, Uint32 numArgs,
-			struct property *result);
-};
-
 struct object_class {
 	char name[256];
+	void *(*constructor)(struct property *args, Uint32 numArgs);
 	Size size;
-	struct object_class *next;
 };
 
+struct object_class *environment_FindClass(const char *name);
+
 struct value_object {
-	char class[256];
+	struct object_class *class;
 	void *data;
 };
 
@@ -265,7 +264,9 @@ struct instr_local {
 };
 
 struct instr_new {
-	char class[256];
+	struct object_class *class;
+	struct instruction *args;
+	Uint32 numArgs;
 };
 
 struct instr_return {
@@ -359,5 +360,5 @@ int view_Send(View *view, event_t type, EventInfo *info);
 Value *view_GetProperty(View *view, type_t type, const char *name);
 bool view_GetBoolProperty(View *view, const char *name);
 Uint32 view_GetColorProperty(View *view, const char *name);
-int view_SetParent(View *parent, View *child);
+int view_SetParent(View *view, View *parent);
 void view_Delete(View *view);

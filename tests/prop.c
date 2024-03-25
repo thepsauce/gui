@@ -26,6 +26,8 @@ int main(void)
 	if (view == NULL) {
 		return 1;
 	}
-	view_SetParent(view_Default(), view);
+	view_SetParent(view, view_Default());
+	view = view_Create("Button", &(Rect) { 100, 10, 80, 30 });
+	view_SetParent(view, view_Default());
 	return gui_Run();
 }

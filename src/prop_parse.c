@@ -84,10 +84,7 @@ static int parser_SkipSpace(struct parser *parser)
 	do {
 		if (parser->c == ';') {
 			isComment = !isComment;
-			parser_NextChar(parser);
-			continue;
-		}
-		if (!isspace(parser->c) && !isComment) {
+		} else if (!isspace(parser->c) && !isComment) {
 			break;
 		}
 	} while (parser_NextChar(parser) != EOF);
@@ -432,7 +429,10 @@ static int parser_ReadObject(struct parser *parser)
 		return -1;
 	}
 	parser_SkipSpace(parser);
-	strcpy(parser->value.object.class, parser->word);
+	parser->value.object.class = environment_FindClass(parser->word);
+	if (parser->value.object.class == NULL) {
+		return -1;
+	}
 	parser->value.object.data = NULL;
 	return 0;
 }
@@ -566,7 +566,7 @@ static int parser_ReadInvoke(struct parser *parser)
 	 * and has skipped the '('
 	 */
 	strcpy(name, parser->word);
-	while (1) {
+	while (parser->c != ')') {
 		if (parser_ReadInstruction(parser) < 0) {
 			return -1;
 		}
@@ -634,11 +634,50 @@ static int parser_ReadLocal(struct parser *parser)
 
 static int parser_ReadNew(struct parser *parser)
 {
+	struct object_class *class;
+	Instruction *args = NULL, *newArgs;
+	Uint32 numArgs = 0;
+
 	if (parser_ReadWord(parser) < 0) {
 		return -1;
 	}
+	class = environment_FindClass(parser->word);
+	if (class == NULL) {
+		return -1;
+	}
+
+	parser_SkipSpace(parser);
+	if (parser->c == '(') {
+		parser_NextChar(parser);
+		parser_SkipSpace(parser);
+		while (parser->c != ')') {
+			if (parser_ReadInstruction(parser) < 0) {
+				return -1;
+			}
+			/* NOT parser->uni! */
+			newArgs = union_Realloc(union_Default(), args,
+					sizeof(*args) * (numArgs + 1));
+			if (newArgs == NULL) {
+				return -1;
+			}
+			args = newArgs;
+			args[numArgs++] = parser->instruction;
+			parser_SkipSpace(parser);
+			if (parser->c != ',') {
+				break;
+			}
+			parser_NextChar(parser);
+			parser_SkipSpace(parser);
+		}
+		if (parser->c != ')') {
+			return -1;
+		}
+		parser_NextChar(parser);
+	}
 	parser->instruction.instr = INSTR_NEW;
-	strcpy(parser->instruction.new.class, parser->word);
+	parser->instruction.new.class = class;
+	parser->instruction.new.args = args;
+	parser->instruction.new.numArgs = numArgs;
 	return 0;
 }
 
@@ -726,9 +765,18 @@ static int parser_ResolveConstant(struct parser *parser)
 		{ "BUTTON_MIDDLE", TYPE_INTEGER, { .i = SDL_BUTTON_MIDDLE } },
 		{ "BUTTON_RIGHT", TYPE_INTEGER, { .i = SDL_BUTTON_RIGHT } },
 	};
+
+	struct object_class *class;
+
+	class = environment_FindClass(parser->word);
+	if (class != NULL) {
+		parser->instruction.type = TYPE_INTEGER;
+		parser->instruction.value.value.i = (Sint64) class;
+		return 0;
+	}
+
 	for (Uint32 i = 0; i < ARRLEN(constants); i++) {
 		if (strcmp(constants[i].word, parser->word) == 0) {
-			printf("%s %u\n", parser->word, constants[i].type);
 			parser->instruction.type = constants[i].type;
 			parser->instruction.value.value = constants[i].value;
 			return 0;
@@ -831,7 +879,10 @@ static int parser_ReadFunction(struct parser *parser)
 			if (parser_ReadWord(parser) < 0) {
 				return -1;
 			}
-			strcpy(p.class, parser->word);
+			p.class = environment_FindClass(parser->word);
+			if (p.class == NULL) {
+				return -1;
+			}
 		}
 		/* parameter name */
 		parser_SkipSpace(parser);
@@ -977,6 +1028,8 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 		}
 		wrappers = newWrappers;
 		strcpy(wrappers[numWrappers].label, parser.label);
+		wrappers[numWrappers].properties = NULL;
+		wrappers[numWrappers].numProperties = 0;
 		numWrappers++;
 	}
 	*uni = parser.uni;

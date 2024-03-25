@@ -8,32 +8,52 @@ Button:
 	.hover = color yellow
 	.is_hovered = bool false
 	.is_pressed = bool false
+	.has_spawned = bool false
 	.circular = bool true
 	.font = font default
-	.obj = object Event
-
-	.smth = function {
-		set obj = new Event
-		set obj = new Event
-	}
 
 	.init = function {
 		print(string "Init\n")
+		;;; TODO: implement this in the parser
+		insert(text, string "hello")
+		insert(array, string "hey", string "bye")
+
+		print(string "array: ")
+		for i to length(array) {
+			print(get(array, i))
+		}
+		print(string "\n")
+
+		print(string "text: ")
+		for i from 0 to length(text) {
+			print(get(text, i))
+		}
+		print(string "\n")
+
+		for i in array {
+			print(i)
+		}
+		;;;
 	}
 	.draw = function {
+		local c = color 0
 		if is_pressed {
 			if is_hovered {
-				SetDrawColor(press)
+				set c = press
 			} else {
-				SetDrawColor(away)
+				set c = away
 			}
 		} else {
 			if is_hovered {
-				SetDrawColor(hover)
+				set c = hover
 			} else {
-				SetDrawColor(background)
+				set c = background
 			}
 		}
+		if has_spawned {
+			set c = rand(int 0, int 1000000)
+		}
+		SetDrawColor(c)
 		FillRect(GetRect(this))
 	}
 	.event = function object Event e {
@@ -48,6 +68,13 @@ Button:
 				set is_pressed = is_hovered
 			}
 		} else if equals(GetType(e), const EVENT_BUTTONUP) {
+			if and(is_pressed, is_hovered, not(has_spawned)) {
+				local b = new View(string "Button")
+				SetRect(b, rand(int 0, GetWindowWidth()),
+					rand(int 0, GetWindowHeight()), int 30, int 30)
+				SetParent(b, GetParent(this))
+				set has_spawned = bool true
+			}
 			set is_pressed = bool false
 		}
 	}
