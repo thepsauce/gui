@@ -167,23 +167,28 @@ typedef int (*EventProc)(struct view*, event_t, EventInfo*);
 
 typedef enum type {
 	TYPE_NULL = -1,
-	TYPE_BOOL = 0,
+	TYPE_ARRAY = 0,
+	TYPE_BOOL,
 	TYPE_COLOR,
+	TYPE_EVENT,
 	TYPE_FLOAT,
 	TYPE_FONT,
 	TYPE_FUNCTION,
 	TYPE_INTEGER,
-	TYPE_OBJECT,
+	TYPE_POINT,
+	TYPE_RECT,
 	TYPE_STRING,
+	TYPE_VIEW
 } type_t;
 
 typedef enum {
-	INSTR_EVENT,
+	INSTR_BREAK,
+	INSTR_FOR,
+	INSTR_FORIN,
 	INSTR_GROUP,
 	INSTR_IF,
 	INSTR_INVOKE,
 	INSTR_LOCAL,
-	INSTR_NEW,
 	INSTR_RETURN,
 	INSTR_SET,
 	INSTR_THIS,
@@ -194,11 +199,14 @@ typedef enum {
 
 struct instruction;
 struct property;
-struct object_class;
+
+struct value_array {
+	struct value *values;
+	Uint32 numValues;
+};
 
 typedef struct parameter {
 	type_t type;
-	struct object_class *class;
 	char name[MAX_WORD];
 } Parameter;
 
@@ -209,17 +217,9 @@ typedef struct function {
 	Uint32 numInstructions;
 } Function;
 
-struct object_class {
-	char name[MAX_WORD];
-	void *(*constructor)(struct property *args, Uint32 numArgs);
-	Size size;
-};
-
-struct object_class *environment_FindClass(const char *name);
-
-struct value_object {
-	struct object_class *class;
-	void *data;
+struct value_event {
+	event_t event;
+	EventInfo info;
 };
 
 struct value_string {
@@ -227,20 +227,43 @@ struct value_string {
 	Uint32 length;
 };
 
-typedef union value {
-	bool b;
-	Uint32 color;
-	float f;
-	void *font;
-	Function *func;
-	Sint64 i;
-	struct value_object object;
-	struct value_string s;
+typedef struct value {
+	type_t type;
+	union {
+		struct value_array *a;
+		bool b;
+		Uint32 c;
+		struct value_event e;
+		float f;
+		void *font;
+		Function *func;
+		Sint64 i;
+		Point p;
+		Rect r;
+		struct value_string *s;
+		struct view *v;
+	};
 } Value;
 
-struct instr_event {
-	event_t event;
-	EventInfo info;
+/* impl: src/environment.c */
+int value_Cast(const Value *in, type_t type, Value *out);
+
+struct instr_break {
+	int nothing;
+};
+
+struct instr_for {
+	char variable[MAX_WORD];
+	/* from can be null, meaning the start is 0 */
+	struct instruction *from;
+	struct instruction *to;
+	struct instruction *iter;
+};
+
+struct instr_forin {
+	char variable[MAX_WORD];
+	struct instruction *in;
+	struct instruction *iter;
 };
 
 struct instr_group {
@@ -263,12 +286,6 @@ struct instr_invoke {
 struct instr_local {
 	char name[MAX_WORD];
 	struct instruction *value;
-};
-
-struct instr_new {
-	struct object_class *class;
-	struct instruction *args;
-	Uint32 numArgs;
 };
 
 struct instr_return {
@@ -294,14 +311,14 @@ struct instr_variable {
 
 typedef struct instruction {
 	instr_t instr;
-	type_t type;
 	union {
-		struct instr_event event;
+		struct instr_break breakk;
+		struct instr_for forr;
+		struct instr_forin forin;
 		struct instr_group group;
 		struct instr_if iff;
 		struct instr_invoke invoke;
 		struct instr_local local;
-		struct instr_new new;
 		struct instr_return ret;
 		struct instr_set set;
 		struct instr_trigger trigger;
@@ -322,7 +339,6 @@ typedef struct property_wrapper {
 } RawWrapper;
 
 typedef struct property {
-	type_t type;
 	char name[MAX_WORD];
 	Value value;
 } Property;
@@ -338,8 +354,8 @@ typedef struct label {
 int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 		Uint32 *pNumWrappers);
 
-int environment_ExecuteFunction(Function *func, Instruction *args,
-		Uint32 numArgs, Property *result);
+int function_Execute(Function *func, Instruction *args, Uint32 numArgs,
+		Value *result);
 Label *environment_FindLabel(const char *name);
 Label *environment_AddLabel(const char *name);
 int environment_Digest(RawWrapper *wrappers, Uint32 numWrappers);

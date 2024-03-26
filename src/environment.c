@@ -1,38 +1,20 @@
 #include "gui.h"
 
-static void *event_constructor(Property *args, Uint32 numArgs);
-static void *point_constructor(Property *args, Uint32 numArgs);
-static void *rect_constructor(Property *args, Uint32 numArgs);
-static void *view_constructor(Property *args, Uint32 numArgs);
-
-struct object_class object_classes[] = {
-	{ "Event", event_constructor, sizeof(Event) },
-	{ "Point", point_constructor, sizeof(Point) },
-	{ "Rect", rect_constructor, sizeof(Rect) },
-	{ "View", view_constructor, sizeof(View) }
-};
-
 static struct environment {
 	Label *label; /* first label in the linked list */
 	Label *cur; /* selected label */
 	View *view; /* current view */
 	Property *stack;
 	Uint32 numStack;
-	struct memo {
-		bool inUse;
-		Uint32 size;
-		void *sys;
-	} *objects;
-	Uint32 numObjects;
 } environment;
 
 static int ExecuteSystem(const char *call,
-		Instruction *args, Uint32 numArgs, Property *result);
-int environment_ExecuteFunction(Function *func,
-		Instruction *args, Uint32 numArgs, Property *result);
-static int EvaluateInstruction(Instruction *instr, Property *prop);
+		Instruction *args, Uint32 numArgs, Value *result);
+int function_Execute(Function *func,
+		Instruction *args, Uint32 numArgs, Value *result);
+static int EvaluateInstruction(Instruction *instr, Value *value);
 static int ExecuteInstructions(Instruction *instrs,
-		Uint32 num, Property *prop);
+		Uint32 num, Value *value);
 
 static char *WordTerminate(struct value_string *s)
 {
@@ -46,77 +28,7 @@ static char *WordTerminate(struct value_string *s)
 	return word;
 }
 
-struct object_class *environment_FindClass(const char *name)
-{
-	for (Uint32 i = 0; i < ARRLEN(object_classes); i++) {
-		if (strcmp(object_classes[i].name, name) == 0) {
-			return &object_classes[i];
-		}
-	}
-	return NULL;
-}
-
-static struct memo *_AllocObject(Uint32 size)
-{
-	struct memo o, *newObjects, *po;
-	void *data;
-
-	newObjects = union_Realloc(union_Default(), environment.objects,
-			sizeof(*newObjects) * (environment.numObjects + 1));
-	if (newObjects == NULL) {
-		return NULL;
-	}
-	environment.objects = newObjects;
-
-	data = union_Alloc(union_Default(), size);
-	if (data == NULL) {
-		return NULL;
-	}
-	o.inUse = false;
-	o.size = size;
-	o.sys = data;
-	po = &environment.objects[environment.numObjects];
-	*po = o;
-	return po;
-}
-
-static void *AllocObject(struct object_class *class)
-{
-	struct memo *const o = _AllocObject(class->size);
-	if (o == NULL) {
-		return NULL;
-	}
-	return o->sys;
-}
-
-static struct memo *LocateObject(void *sys)
-{
-	for (Uint32 i = 0; i < environment.numObjects; i++) {
-		if (environment.objects[i].sys == sys) {
-			return &environment.objects[i];
-		}
-	}
-	return NULL;
-}
-
-static void *DuplicateObject(void *sys)
-{
-	struct memo *dup;
-
-	for (Uint32 i = 0; i < environment.numObjects; i++) {
-		if (environment.objects[i].sys == sys) {
-			dup = _AllocObject(environment.objects[i].size);
-			if (dup == NULL) {
-				return NULL;
-			}
-			memcpy(dup->sys, sys, dup->size);
-			return dup->sys;
-		}
-	}
-	return NULL;
-}
-
-static int CastProperty(const Property *in, type_t type, Property *out)
+int value_Cast(const Value *in, type_t type, Value *out)
 {
 	if (in->type == type) {
 		*out = *in;
@@ -125,27 +37,27 @@ static int CastProperty(const Property *in, type_t type, Property *out)
 	switch (type) {
 	case TYPE_INTEGER:
 		if (in->type == TYPE_COLOR) {
-			out->value.i = in->value.color;
+			out->i = in->c;
 		} else if (in->type == TYPE_FLOAT) {
-			out->value.i = in->value.f;
+			out->i = in->f;
 		} else {
 			return -1;
 		}
 		break;
 	case TYPE_FLOAT:
 		if (in->type == TYPE_COLOR) {
-			out->value.f = in->value.color;
+			out->f = in->c;
 		} else if (in->type == TYPE_INTEGER) {
-			out->value.f = in->value.i;
+			out->f = in->i;
 		} else {
 			return -1;
 		}
 		break;
 	case TYPE_COLOR:
 		if (in->type == TYPE_FLOAT) {
-			out->value.color = in->value.f;
+			out->c = in->f;
 		} else if (in->type == TYPE_INTEGER) {
-			out->value.color = in->value.i;
+			out->c = in->i;
 		} else {
 			return -1;
 		}
@@ -199,8 +111,7 @@ static int StandardProc(View *view, event_t event, EventInfo *info)
 {
 	View *prev;
 	Value *value;
-	Property prop;
-	Event e;
+	Value v;
 	Instruction i;
 
 	(void) info;
@@ -212,188 +123,37 @@ static int StandardProc(View *view, event_t event, EventInfo *info)
 		if (value == NULL) {
 			break;
 		}
-		environment_ExecuteFunction(value->func, NULL, 0, &prop);
+		function_Execute(value->func, NULL, 0, &v);
 		break;
 	case EVENT_PAINT:
 		value = view_GetProperty(view, TYPE_FUNCTION, "draw");
 		if (value == NULL) {
 			break;
 		}
-		environment_ExecuteFunction(value->func, NULL, 0, &prop);
+		function_Execute(value->func, NULL, 0, &v);
 		break;
 	default:
 		value = view_GetProperty(view, TYPE_FUNCTION, "event");
 		if (value == NULL) {
 			break;
 		}
-		e.type = event;
-		e.info = *info;
 		i.instr = INSTR_VALUE;
-		i.type = TYPE_OBJECT;
-		i.value.value.object.class = environment_FindClass("Event");
-		i.value.value.object.data = &e;
-		environment_ExecuteFunction(value->func, &i, 1, &prop);
+		v.type = TYPE_EVENT;
+		v.e.event = event;
+		v.e.info = *info;
+		i.value.value = v;
+		function_Execute(value->func, &i, 1, &v);
 		break;
 	}
 	environment.view = prev;
 	return 0;
 }
 
-static void *CallConstructor(struct object_class *class, Instruction *instrs,
-		Uint32 numInstrs)
-{
-	Property args[numInstrs];
-	for (Uint32 i = 0; i < numInstrs; i++) {
-		if (EvaluateInstruction(&instrs[i], &args[i]) < 0) {
-			return NULL;
-		}
-	}
-	return class->constructor(args, numInstrs);
-}
-
-static bool IsPropertyObject(const Property *prop, const char *class)
-{
-	if (prop->type != TYPE_OBJECT) {
-		return false;
-	}
-	return prop->value.object.class == environment_FindClass(class);
-}
-
-static int args_GetRect(Property *args, Uint32 numArgs, Rect *r)
-{
-	Property prop;
-
-	if (numArgs == 4) {
-		Sint32 nums[4];
-
-		for (Uint32 i = 0; i < numArgs; i++) {
-			if (CastProperty(&args[i], TYPE_INTEGER, &prop) < 0) {
-				return -1;
-			}
-			nums[i] = prop.value.i;
-		}
-		*r = (Rect) { nums[0], nums[1], nums[2], nums[3] };
-	} else if (numArgs == 1) {
-		if (!IsPropertyObject(&args[0], "Rect")) {
-			return -1;
-		}
-		*r = *(Rect*) args[0].value.object.data;
-	} else {
-		return -1;
-	}
-	return 0;
-}
-
-
-static void *event_constructor(Property *args, Uint32 numArgs)
-{
-	/* events shall not be constructed */
-	(void) args;
-	(void) numArgs;
-	return NULL;
-}
-
-static void *point_constructor(Property *args, Uint32 numArgs)
-{
-	struct memo *o;
-	Point *p;
-
-	o = _AllocObject(sizeof(*p));
-	if (o == NULL) {
-		return NULL;
-	}
-	p = o->sys;
-	if (numArgs == 0) {
-		p->x = 0;
-		p->y = 0;
-	} else if (numArgs == 2) {
-		Sint32 nums[2];
-		Property prop;
-
-		for (Uint32 i = 0; i < numArgs; i++) {
-			if (CastProperty(&args[i], TYPE_INTEGER, &prop) < 0) {
-				return NULL;
-			}
-			nums[i] = prop.value.i;
-		}
-		p->x = nums[0];
-		p->y = nums[1];
-	} else {
-		return NULL;
-	}
-	return p;
-}
-
-static void *rect_constructor(Property *args, Uint32 numArgs)
-{
-	struct memo *o;
-	Rect *r;
-
-	o = _AllocObject(sizeof(*r));
-	if (o == NULL) {
-		return NULL;
-	}
-	r = o->sys;
-	if (numArgs == 0) {
-		r->x = 0;
-		r->y = 0;
-		r->w = 0;
-		r->h = 0;
-	} else if (numArgs == 4) {
-		Sint32 nums[4];
-		Property prop;
-
-		for (Uint32 i = 0; i < numArgs; i++) {
-			if (CastProperty(&args[i], TYPE_INTEGER, &prop) < 0) {
-				return NULL;
-			}
-			nums[i] = prop.value.i;
-		}
-		r->x = nums[0];
-		r->y = nums[1];
-		r->w = nums[2];
-		r->h = nums[3];
-	} else {
-		return NULL;
-	}
-	return r;
-}
-
-static void *view_constructor(Property *args, Uint32 numArgs)
-{
-	View *v;
-	Rect r;
-	char *class;
-
-	if (numArgs == 0 || args[0].type != TYPE_STRING) {
-		return NULL;
-	}
-	class = WordTerminate(&args[0].value.s);
-	if (class == NULL) {
-		return NULL;
-	}
-	if (numArgs > 1) {
-		if (args_GetRect(&args[1], numArgs - 1, &r) < 0) {
-			return NULL;
-		}
-	} else {
-		r.x = 0;
-		r.y = 0;
-		r.w = 0;
-		r.h = 0;
-	}
-	v = view_Create(class, &r);
-	if (v == NULL) {
-		return NULL;
-	}
-	return v;
-}
-
-int environment_ExecuteFunction(Function *func,
-		Instruction *args, Uint32 numArgs, Property *result)
+int function_Execute(Function *func, Instruction *args, Uint32 numArgs,
+		Value *result)
 {
 	Property *newStack;
-	Property prop;
+	Value value;
 	int r;
 
 	if (func->numParams != numArgs) {
@@ -418,40 +178,36 @@ int environment_ExecuteFunction(Function *func,
 
 	for (Uint32 i = 0; i < numArgs; i++) {
 		Property *const s = &environment.stack[environment.numStack];
-		if (EvaluateInstruction(&args[i], s) < 0) {
+		if (EvaluateInstruction(&args[i], &s->value) < 0) {
 			return -1;
 		}
-		if (func->params[i].type != s->type) {
-			return -1;
-		}
-		if (func->params[i].type == TYPE_OBJECT &&
-				func->params[i].class !=
-				s->value.object.class) {
+		if (func->params[i].type != s->value.type) {
 			return -1;
 		}
 		strcpy(s->name, func->params[i].name);
 		environment.numStack++;
 	}
 	r = ExecuteInstructions(func->instructions, func->numInstructions,
-			&prop);
+			&value);
 	if (r < 0) {
 		return -1;
 	}
 	if (r == 1) {
-		*result = prop;
+		*result = value;
 	}
 	environment.numStack = oldNumStack;
 	return 0;
 }
 
-static int EvaluateInstruction(Instruction *instr, Property *prop)
+static int EvaluateInstruction(Instruction *instr, Value *result)
 {
 	Property *var;
 	Value *value;
-	void *data;
 
 	switch (instr->instr) {
-	case INSTR_EVENT:
+	case INSTR_BREAK:
+	case INSTR_FOR:
+	case INSTR_FORIN:
 	case INSTR_GROUP:
 	case INSTR_IF:
 	case INSTR_LOCAL:
@@ -461,89 +217,146 @@ static int EvaluateInstruction(Instruction *instr, Property *prop)
 		return -1;
 	case INSTR_INVOKE:
 		var = SearchVariable(instr->invoke.name, NULL);
-		if (var == NULL || var->type != TYPE_FUNCTION) {
+		if (var == NULL || var->value.type != TYPE_FUNCTION) {
 			if (ExecuteSystem(instr->invoke.name,
 					instr->invoke.args,
-					instr->invoke.numArgs, prop) < 0) {
+					instr->invoke.numArgs, result) < 0) {
 				return -1;
 			}
-		} else if (environment_ExecuteFunction(var->value.func,
+		} else if (function_Execute(var->value.func,
 					instr->invoke.args,
-					instr->invoke.numArgs, prop) < 0) {
+					instr->invoke.numArgs, result) < 0) {
 			return -1;
 		}
-		break;
-	case INSTR_NEW:
-		data = CallConstructor(instr->new.class, instr->new.args,
-				instr->new.numArgs);
-		if (data == NULL) {
-			return -1;
-		}
-		prop->type = TYPE_OBJECT;
-		prop->value.object.class = instr->new.class;
-		prop->value.object.data = data;
 		break;
 	case INSTR_THIS:
-		prop->type = TYPE_OBJECT;
-		prop->value.object.class = environment_FindClass("View");
-		prop->value.object.data = environment.view;
+		result->type = TYPE_VIEW;
+		result->v = environment.view;
 		break;
 	case INSTR_VALUE:
-		prop->type = instr->type;
-		prop->value = instr->value.value;
+		*result = instr->value.value;
 		break;
 	case INSTR_VARIABLE:
 		var = SearchVariable(instr->variable.name, &value);
 		if (var == NULL) {
 			return -1;
 		}
-		prop->type = var->type;
-		prop->value = *value;
+		*result = *value;
 		break;
 	}
 	return 0;
 }
 
-static int ExecuteInstruction(Instruction *instr, Property *prop)
+static int ExecuteInstruction(Instruction *instr, Value *result)
 {
 	Property *var;
 	Value *pValue;
-	struct memo *o;
 	bool b;
 	Property *newStack;
-	Property out;
+	Value out;
+	Value from, to, in;
+	Uint32 index;
 
 	switch (instr->instr) {
 	case INSTR_VALUE:
 	case INSTR_VARIABLE:
-	case INSTR_NEW:
 	case INSTR_THIS:
 		break;
-	case INSTR_EVENT:
-		printf("event: %u\n", instr->event.event);
-		break;
-	case INSTR_GROUP:
-		return ExecuteInstructions(instr->group.instructions,
-				instr->group.numInstructions, prop);
-	case INSTR_IF:
-		if (EvaluateInstruction(instr->iff.condition, prop) < 0) {
+	case INSTR_BREAK:
+		return 2;
+	case INSTR_FOR:
+		if (instr->forr.from == NULL) {
+			from.i = 0;
+		} else if (EvaluateInstruction(instr->forr.from, &from) < 0) {
 			return -1;
 		}
-		if (prop->type == TYPE_INTEGER) {
-			b = !!prop->value.i;
-		} else if (prop->type == TYPE_BOOL) {
-			b = prop->value.b;
+		if (EvaluateInstruction(instr->forr.to, &to) < 0) {
+			return -1;
+		}
+		newStack = union_Realloc(union_Default(), environment.stack,
+				sizeof(*newStack) *
+				(environment.numStack + 1));
+		if (newStack == NULL) {
+			return -1;
+		}
+		environment.stack = newStack;
+		index = environment.numStack++;
+
+		strcpy(environment.stack[index].name, instr->forr.variable);
+		environment.stack[index].value.type = TYPE_INTEGER;
+		for (Sint64 i = from.i; i < to.i; i++) {
+			environment.stack[index].value.i = i;
+			const int r = ExecuteInstruction(instr->forr.iter,
+					result);
+			if (r == 2) {
+				environment.numStack = index;
+				return 0;
+			}
+			if (r != 0) {
+				return r;
+			}
+		}
+		environment.numStack = index;
+		break;
+	case INSTR_FORIN:
+		if (EvaluateInstruction(instr->forin.in, &in) < 0 ||
+				in.type != TYPE_STRING) {
+			return -1;
+		}
+		newStack = union_Realloc(union_Default(), environment.stack,
+				sizeof(*newStack) *
+				(environment.numStack + 1));
+		if (newStack == NULL) {
+			return -1;
+		}
+		environment.stack = newStack;
+		index = environment.numStack++;
+
+		strcpy(environment.stack[index].name, instr->forin.variable);
+		environment.stack[index].value.type = TYPE_INTEGER;
+		for (Sint64 i = 0; i < in.s->length; i++) {
+			environment.stack[index].value.i = in.s->data[i];
+			const int r = ExecuteInstruction(instr->forin.iter,
+					result);
+			if (r == 2) {
+				printf("REACHED BREAK\n");
+				environment.numStack = index;
+				return 0;
+			}
+			if (r != 0) {
+				return r;
+			}
+		}
+		environment.numStack = index;
+		break;
+	case INSTR_GROUP: {
+		index = environment.numStack;
+		const int r = ExecuteInstructions(instr->group.instructions,
+				instr->group.numInstructions, result);
+		environment.numStack = index;
+		return r;
+	  }
+
+	case INSTR_IF:
+		if (EvaluateInstruction(instr->iff.condition, result) < 0) {
+			return -1;
+		}
+		if (result->type == TYPE_INTEGER) {
+			b = !!result->i;
+		} else if (result->type == TYPE_BOOL) {
+			b = result->b;
 		} else {
 			return -1;
 		}
 		if (b) {
-			return ExecuteInstruction(instr->iff.iff, prop);
+			return ExecuteInstruction(instr->iff.iff, result);
 		} else if (instr->iff.els != NULL) {
-			return ExecuteInstruction(instr->iff.els, prop);
+			return ExecuteInstruction(instr->iff.els, result);
 		}
 		break;
+
 	case INSTR_LOCAL:
-		if (EvaluateInstruction(instr->local.value, prop) < 0) {
+		if (EvaluateInstruction(instr->local.value, result) < 0) {
 			return -1;
 		}
 		newStack = union_Realloc(union_Default(), environment.stack,
@@ -552,54 +365,34 @@ static int ExecuteInstruction(Instruction *instr, Property *prop)
 			return -1;
 		}
 		environment.stack = newStack;
-		strcpy(prop->name, instr->local.name);
-		environment.stack[environment.numStack++] = *prop;
+		strcpy(environment.stack[environment.numStack].name,
+				instr->local.name);
+		environment.stack[environment.numStack++].value = *result;
 		break;
 	case INSTR_RETURN:
-		if (EvaluateInstruction(instr->ret.value, prop) < 0) {
+		if (EvaluateInstruction(instr->ret.value, result) < 0) {
 			return -1;
 		}
 		return 1;
 
 	case INSTR_SET:
 		var = SearchVariable(instr->set.variable, &pValue);
-		if (var == NULL || var->type == TYPE_FUNCTION) {
+		if (var == NULL || var->value.type == TYPE_FUNCTION) {
 			return -1;
 		}
-		if (EvaluateInstruction(instr->set.value, prop) < 0) {
+		if (EvaluateInstruction(instr->set.value, result) < 0) {
 			return -1;
 		}
-		if (CastProperty(prop, var->type, &out) < 0) {
+		if (value_Cast(result, var->value.type, &out) < 0) {
 			return -1;
-		}
-		if (out.type == TYPE_OBJECT) {
-			if (var->value.object.data != NULL) {
-				o = LocateObject(var->value.object.data);
-				if (o == NULL) {
-					return -1;
-				}
-				o->inUse = false;
-			}
-			if (out.value.object.data != NULL) {
-				o = LocateObject(out.value.object.data);
-				if (o == NULL) {
-					return -1;
-				}
-				if (o->inUse) {
-					out.value.object.data =
-						DuplicateObject(o);
-					if (out.value.object.data == NULL) {
-						return -1;
-					}
-				}
-			}
 		}
 		if (pValue != NULL) {
-			*pValue = out.value;
+			*pValue = out;
 		} else {
-			var->value = out.value;
+			var->value = out;
 		}
 		break;
+
 	case INSTR_TRIGGER:
 		/* TODO: make trigger system */
 		/* triggers are just system functions but defined
@@ -609,15 +402,15 @@ static int ExecuteInstruction(Instruction *instr, Property *prop)
 		break;
 	case INSTR_INVOKE:
 		var = SearchVariable(instr->invoke.name, NULL);
-		if (var == NULL || var->type != TYPE_FUNCTION) {
+		if (var == NULL || var->value.type != TYPE_FUNCTION) {
 			if (ExecuteSystem(instr->invoke.name,
 					instr->invoke.args,
-					instr->invoke.numArgs, prop) < 0) {
+					instr->invoke.numArgs, result) < 0) {
 				return -1;
 			}
-		} else if (environment_ExecuteFunction(var->value.func,
+		} else if (function_Execute(var->value.func,
 					instr->invoke.args,
-					instr->invoke.numArgs, prop) < 0) {
+					instr->invoke.numArgs, result) < 0) {
 			return -1;
 		}
 		break;
@@ -626,10 +419,10 @@ static int ExecuteInstruction(Instruction *instr, Property *prop)
 }
 
 static int ExecuteInstructions(Instruction *instrs,
-		Uint32 num, Property *prop)
+		Uint32 num, Value *result)
 {
 	for (Uint32 i = 0; i < num; i++) {
-		const int r = ExecuteInstruction(&instrs[i], prop);
+		const int r = ExecuteInstruction(&instrs[i], result);
 		if (r != 0) {
 			return r;
 		}
@@ -637,178 +430,334 @@ static int ExecuteInstructions(Instruction *instrs,
 	return 0;
 }
 
-static int SystemAnd(Property *args, Uint32 numArgs, Property *result)
+static int SystemAnd(Value *args, Uint32 numArgs, Value *result)
 {
 	result->type = TYPE_BOOL;
-	result->value.b = true;
+	result->b = true;
 	for (Uint32 i = 0; i < numArgs; i++) {
 		if (args[i].type != TYPE_BOOL &&
 				args[i].type != TYPE_INTEGER) {
 			return -1;
 		}
-		if (args[i].type == TYPE_BOOL && !args[i].value.b) {
-			result->value.b = false;
+		if (args[i].type == TYPE_BOOL && !args[i].b) {
+			result->b = false;
 			break;
 		}
-		if (args[i].type == TYPE_INTEGER && args[i].value.i == 0) {
-			result->value.b = false;
+		if (args[i].type == TYPE_INTEGER && args[i].i == 0) {
+			result->b = false;
 			break;
 		}
 	}
 	return 0;
 }
 
-static int SystemOr(Property *args, Uint32 numArgs, Property *result)
+static int SystemOr(Value *args, Uint32 numArgs, Value *result)
 {
 	result->type = TYPE_BOOL;
-	result->value.b = false;
+	result->b = false;
 	for (Uint32 i = 0; i < numArgs; i++) {
 		if (args[i].type != TYPE_BOOL &&
 				args[i].type != TYPE_INTEGER) {
 			return -1;
 		}
-		if (args[i].type == TYPE_BOOL && args[i].value.b) {
-			result->value.b = true;
+		if (args[i].type == TYPE_BOOL && args[i].b) {
+			result->b = true;
 			break;
 		}
-		if (args[i].type == TYPE_INTEGER && args[i].value.i != 0) {
-			result->value.b = true;
+		if (args[i].type == TYPE_INTEGER && args[i].i != 0) {
+			result->b = true;
 			break;
 		}
 	}
 	return 0;
 }
 
-static int SystemNot(Property *args, Uint32 numArgs, Property *result)
+static int SystemNot(Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 1) {
 		return -1;
 	}
 	result->type = TYPE_BOOL;
 	if (args[0].type == TYPE_BOOL) {
-		result->value.b = !args[0].value.b;
+		result->b = !args[0].b;
 	} else if (args[0].type == TYPE_INTEGER) {
-		result->value.b = args[0].value.i == 0;
+		result->b = args[0].i == 0;
 	} else {
 		return -1;
 	}
 	return 0;
 }
 
-static int SystemEquals(Property *args, Uint32 numArgs, Property *result)
+static bool Equals(Value *v1, Value *v2)
+{
+	switch (v1->type) {
+	case TYPE_NULL:
+		return false;
+	case TYPE_ARRAY:
+		if (v1->a->numValues != v2->a->numValues) {
+			return false;
+		}
+		for (Uint32 i = 0; i < v1->a->numValues; i++) {
+			if (!Equals(&v1->a->values[i], &v2->a->values[i])) {
+				return false;
+			}
+		}
+		break;
+	case TYPE_BOOL:
+		if (v1->b != v2->b) {
+			return false;
+		}
+		break;
+	case TYPE_EVENT:
+		/* TODO:? who cares about comparing events? */
+		return false;
+	case TYPE_INTEGER:
+		if (v1->i != v2->i) {
+			return false;
+		}
+		break;
+	case TYPE_COLOR:
+		if (v1->c != v2->c) {
+			return false;
+		}
+		break;
+	case TYPE_FLOAT:
+		if (v1->f != v2->f) {
+			return false;
+		}
+		break;
+	case TYPE_FONT:
+		if (v1->font != v2->font) {
+			return false;
+		}
+		break;
+	case TYPE_FUNCTION:
+		if (v1->func != v2->func) {
+			return false;
+		}
+		break;
+	case TYPE_POINT:
+		if (v1->p.x != v2->p.x || v1->p.y != v2->p.y) {
+			return false;
+		}
+		break;
+	case TYPE_RECT:
+		if (v1->r.x != v2->r.x || v1->r.y != v2->r.y ||
+				v1->r.w != v2->r.w || v1->r.h != v2->r.h) {
+			return false;
+		}
+		break;
+	case TYPE_STRING:
+		if (v1->s->length != v2->s->length ||
+				memcmp(v1->s->data, v2->s->data, v1->s->length)
+				!= 0) {
+			return false;
+		}
+		break;
+	case TYPE_VIEW:
+		if (v1->v != v2->v) {
+			return false;
+		}
+		break;
+	}
+	return true;
+}
+
+static int SystemEquals(Value *args, Uint32 numArgs, Value *result)
 {
 	result->type = TYPE_BOOL;
-	result->value.b = true;
+	result->b = true;
 	for (Uint32 i = 0; i < numArgs; i++) {
 		for (Uint32 j = i + 1; j < numArgs; j++) {
 			if (args[i].type != args[j].type) {
-				result->value.b = false;
+				result->b = false;
 				return 0;
 			}
-			switch (args[i].type) {
-			case TYPE_NULL:
-				return -1;
-			case TYPE_BOOL:
-				if (args[i].value.b != args[j].value.b) {
-					result->value.b = false;
-					return 0;
-				}
-				break;
-			case TYPE_INTEGER:
-				if (args[i].value.i != args[j].value.i) {
-					result->value.b = false;
-					return 0;
-				}
-				break;
-			case TYPE_COLOR:
-				if (args[i].value.color != args[j].value.color) {
-					result->value.b = false;
-					return 0;
-				}
-				break;
-			case TYPE_FLOAT:
-				if (args[i].value.f != args[j].value.f) {
-					result->value.b = false;
-					return 0;
-				}
-				break;
-			case TYPE_FONT:
-				if (args[i].value.font != args[j].value.font) {
-					result->value.b = false;
-					return 0;
-				}
-				break;
-			case TYPE_OBJECT:
-				break;
-			case TYPE_FUNCTION:
-				if (args[i].value.func != args[j].value.func) {
-					result->value.b = false;
-					return 0;
-				}
-				break;
-			case TYPE_STRING:
-				if (args[i].value.s.length !=
-						args[j].value.s.length ||
-						memcmp(args[i].value.s.data,
-						args[j].value.s.data,
-						args[i].value.s.length) != 0) {
-					result->value.b = false;
-					return 0;
-				}
-				break;
+			result->b = Equals(&args[i], &args[j]);
+			if (!result->b) {
+				return 0;
 			}
 		}
 	}
 	return 0;
 }
 
-static int SystemPrint(Property *args, Uint32 numArgs, Property *result)
+static int SystemGet(Value *args, Uint32 numArgs, Value *result)
 {
-	FILE *const fp = stdout;
+	Value val;
 
-	for (Uint32 i = 0; i < numArgs; i++) {
-		Property *const prop = &args[i];
-		switch (prop->type) {
-		case TYPE_NULL:
-			/* should not happen */
-			break;
-		case TYPE_BOOL:
-			fprintf(fp, "%s", prop->value.b ?
-					"true" : "false");
-			break;
-		case TYPE_COLOR:
-			fprintf(fp, "%#x", prop->value.color);
-			break;
-		case TYPE_FLOAT:
-			fprintf(fp, "%f", prop->value.f);
-			break;
-		case TYPE_FONT:
-			fprintf(fp, "%p", prop->value.font);
-			break;
-		case TYPE_FUNCTION:
-			fprintf(fp, "%p", prop->value.func);
-			break;
-		case TYPE_INTEGER:
-			fprintf(fp, "%ld", prop->value.i);
-			break;
-		case TYPE_OBJECT:
-			fprintf(fp, "%s %p",
-				prop->value.object.class->name,
-				prop->value.object.data);
-			break;
-		case TYPE_STRING:
-			fprintf(fp, "%.*s", prop->value.s.length, prop->value.s.data);
-			break;
+	if (numArgs != 2) {
+		return -1;
+	}
+	if (value_Cast(&args[0], TYPE_INTEGER, &val) < 0 || val.i < 0) {
+		return -1;
+	}
+	if (args[0].type == TYPE_ARRAY) {
+		if (val.i >= args[0].a->numValues) {
+			return -1;
 		}
+		*result = args[0].a->values[val.i];
+	} else if (args[0].type == TYPE_STRING) {
+		if (val.i >= args[0].s->length) {
+			return -1;
+		}
+		result->type = TYPE_INTEGER;
+		result->i = args[0].s->data[val.i];
+	} else {
+		return -1;
+	}
+	return 0;
+}
+
+static int SystemInsert(Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs < 2) {
+		return -1;
+	}
+	if (args[0].type == TYPE_ARRAY) {
+		struct value_array *arr;
+		Value *newValues;
+
+		arr = args[0].a;
+		newValues = union_Realloc(union_Default(), arr->values,
+				sizeof(*arr->values) *
+				(arr->numValues + numArgs - 1));
+		if (newValues == NULL) {
+			return -1;
+		}
+		arr->values = newValues;
+		memcpy(&arr->values[1], &args[1],
+				sizeof(*arr->values) * (numArgs - 1));
+		arr->numValues += numArgs - 1;
+	} else if (args[0].type == TYPE_STRING) {
+		struct value_string *str;
+		Uint32 count, index;
+		char *newData;
+
+		count = 0;
+		for (Uint32 i = 1; i < numArgs; i++) {
+			if (args[i].type == TYPE_STRING) {
+				count += args[i].s->length;
+			} else if (args[i].type == TYPE_INTEGER) {
+				Uint64 u;
+
+				u = args[i].i;
+				do {
+					count++;
+					u >>= 8;
+				} while (u > 0);
+			} else {
+				return -1;
+			}
+		}
+
+
+		str = args[0].s;
+		newData = union_Realloc(union_Default(), str->data,
+				str->length + count);
+		if (newData == NULL) {
+			return -1;
+		}
+		str->data = newData;
+
+		index = str->length;
+		for (Uint32 i = 1; i < numArgs; i++) {
+			if (args[i].type == TYPE_STRING) {
+				memcpy(&str->data[index], args[i].s->data,
+						args[i].s->length);
+				index += args[i].s->length;
+			} else if (args[i].type == TYPE_INTEGER) {
+				Uint64 u;
+
+				u = args[i].i;
+				do {
+					str->data[index++] = u & 0xff;
+					u >>= 8;
+				} while (u > 0);
+			} else {
+				return -1;
+			}
+		}
+		str->length = index;
+	} else {
+		return -1;
 	}
 	(void) result;
 	return 0;
 }
 
-static int SystemSum(Property *args, Uint32 numArgs, Property *result)
+static void PrintValue(Value *value, FILE *fp)
 {
+	switch (value->type) {
+	case TYPE_NULL:
+		/* should not happen */
+		break;
+	case TYPE_ARRAY:
+		fputc('[', fp);
+		fputc(' ', fp);
+		for (Uint32 i = 0; i < value->a->numValues; i++) {
+			if (i > 0) {
+				fputc(',', fp);
+				fputc(' ', fp);
+			}
+			PrintValue(&value->a->values[i], fp);
+		}
+		fputc(']', fp);
+		break;
+	case TYPE_BOOL:
+		fprintf(fp, "%s", value->b ?
+				"true" : "false");
+		break;
+	case TYPE_COLOR:
+		fprintf(fp, "%#x", value->c);
+		break;
+	case TYPE_EVENT:
+		break;
+	case TYPE_FLOAT:
+		fprintf(fp, "%f", value->f);
+		break;
+	case TYPE_FONT:
+		fprintf(fp, "%p", value->font);
+		break;
+	case TYPE_FUNCTION:
+		fprintf(fp, "%p", value->func);
+		break;
+	case TYPE_INTEGER:
+		fprintf(fp, "%ld", value->i);
+		break;
+	case TYPE_POINT:
+		fprintf(fp, "%d, %d", value->p.x, value->p.y);
+		break;
+	case TYPE_RECT:
+		fprintf(fp, "%d, %d, %d, %d",
+				value->r.x, value->r.y, value->r.w, value->r.h);
+		break;
+	case TYPE_STRING:
+		fprintf(fp, "%.*s", value->s->length, value->s->data);
+		break;
+	case TYPE_VIEW:
+		fprintf(fp, "%p", value->v);
+		break;
+	}
+}
+
+static int SystemPrint(Value *args, Uint32 numArgs, Value *result)
+{
+	FILE *const fp = stdout;
+	for (Uint32 i = 0; i < numArgs; i++) {
+		PrintValue(&args[i], fp);
+	}
+	(void) result;
+	return 0;
+}
+
+static int SystemSum(Value *args, Uint32 numArgs, Value *result)
+{
+	Value val;
+
 	result->type = TYPE_INTEGER;
-	memset(&result->value, 0, sizeof(result->value));
+	result->f = 0;
+	result->i = 0;
 	for (Uint32 i = 0; i < numArgs; i++) {
 		if (args[i].type == TYPE_FLOAT) {
 			result->type = TYPE_FLOAT;
@@ -816,28 +765,21 @@ static int SystemSum(Property *args, Uint32 numArgs, Property *result)
 		}
 	}
 	for (Uint32 i = 0; i < numArgs; i++) {
-		if (args[i].type == TYPE_INTEGER) {
-			if (result->type == TYPE_FLOAT) {
-				result->value.f += args[i].value.i;
-			} else {
-				result->value.i += args[i].value.i;
-			}
-		} else if (args[i].type == TYPE_FLOAT) {
-			if (result->type == TYPE_FLOAT) {
-				result->value.f += args[i].value.f;
-			} else {
-				result->value.i += args[i].value.f;
-			}
-		} else {
+		if (value_Cast(&args[i], result->type, &val) < 0) {
 			return -1;
+		}
+		if (result->type == TYPE_INTEGER) {
+			result->i += val.i;
+		} else {
+			result->f += val.f;
 		}
 	}
 	return 0;
 }
 
-static int SystemRand(Property *args, Uint32 numArgs, Property *result)
+static int SystemRand(Value *args, Uint32 numArgs, Value *result)
 {
-	Property prop;
+	Value val;
 	Sint64 nums[2];
 	Sint64 r;
 
@@ -845,10 +787,10 @@ static int SystemRand(Property *args, Uint32 numArgs, Property *result)
 		return -1;
 	}
 	for (Uint32 i = 0; i < numArgs; i++) {
-		if (CastProperty(&args[i], TYPE_INTEGER, &prop) < 0) {
+		if (value_Cast(&args[i], TYPE_INTEGER, &val) < 0) {
 			return -1;
 		}
-		nums[i] = prop.value.i;
+		nums[i] = val.i;
 	}
 	if (nums[0] > nums[1]) {
 		return -1;
@@ -858,148 +800,168 @@ static int SystemRand(Property *args, Uint32 numArgs, Property *result)
 	r /= RAND_MAX;
 	r += nums[0];
 	result->type = TYPE_INTEGER;
-	result->value.i = r;
+	result->i = r;
 	return 0;
 }
 
-static int SystemContains(Property *args, Uint32 numArgs, Property *result)
+static int SystemContains(Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 2) {
 		return -1;
 	}
-	if (!IsPropertyObject(&args[0], "Rect") ||
-			!IsPropertyObject(&args[1], "Point")) {
+	if (args[0].type != TYPE_RECT || args[1].type != TYPE_POINT) {
 		return -1;
 	}
 	result->type = TYPE_BOOL;
-	result->value.b = rect_Contains(args[0].value.object.data,
-			args[1].value.object.data);
+	result->b = rect_Contains(&args[0].r, &args[1].p);
 	return 0;
 }
 
-static int SystemGetClass(Property *args, Uint32 numArgs, Property *result)
+static int args_GetRect(Value *args, Uint32 numArgs, Rect *r)
 {
-	if (numArgs != 1 || args[0].type != TYPE_OBJECT) {
+	Value v;
+
+	if (numArgs == 4) {
+		Sint32 nums[4];
+
+		for (Uint32 i = 0; i < numArgs; i++) {
+			if (value_Cast(&args[i], TYPE_INTEGER, &v) < 0) {
+				return -1;
+			}
+			nums[i] = v.i;
+		}
+		*r = (Rect) { nums[0], nums[1], nums[2], nums[3] };
+	} else if (numArgs == 1) {
+		if (args[0].type != TYPE_RECT) {
+			return -1;
+		}
+		*r = args[0].r;
+	} else {
 		return -1;
 	}
-	result->type = TYPE_INTEGER;
-	result->value.i = (Sint64) args[0].value.object.class;
 	return 0;
 }
 
-static int SystemGetObject(Property *args, Uint32 numArgs, Property *result)
+static int SystemCreateView(Value *args, Uint32 numArgs, Value *result)
 {
-	if (numArgs != 1 || args[0].type != TYPE_STRING) {
+	Rect r;
+	char *class;
+	View *view;
+
+	if (numArgs == 0 || args[0].type != TYPE_STRING) {
 		return -1;
 	}
-	result->type = TYPE_OBJECT;
-	result->value.object.class = environment_FindClass("View");
-	/* TODO: add id system */
-	result->value.object.data = NULL;
-	return 0;
-}
-
-static int SystemGetParent(Property *args, Uint32 numArgs, Property *result)
-{
-	View *v;
-
-	if (numArgs != 1 || !IsPropertyObject(&args[0], "View")) {
+	class = WordTerminate(args[0].s);
+	if (class == NULL) {
 		return -1;
 	}
-	v = args[0].value.object.data;
-	result->type = TYPE_OBJECT;
-	result->value.object.class = environment_FindClass("View");
-	result->value.object.data = v->parent;
+	if (numArgs > 1) {
+		if (args_GetRect(&args[1], numArgs - 1, &r) < 0) {
+			return -1;
+		}
+	} else {
+		r.x = 0;
+		r.y = 0;
+		r.w = 0;
+		r.h = 0;
+	}
+	view = view_Create(class, &r);
+	if (view == NULL) {
+		return -1;
+	}
+	result->type = TYPE_VIEW;
+	result->v = view;
 	return 0;
 }
 
-static int SystemSetDrawColor(Property *args, Uint32 numArgs, Property *result)
+static int SystemGetParent(Value *args, Uint32 numArgs, Value *result)
 {
-	Property prop;
+	if (numArgs != 1 || args[0].type != TYPE_VIEW) {
+		return -1;
+	}
+	result->type = TYPE_VIEW;
+	result->v = args[0].v->parent;
+	return 0;
+}
+
+static int SystemSetDrawColor(Value *args, Uint32 numArgs, Value *result)
+{
+	Value value;
 
 	if (numArgs != 1) {
 		return -1;
 	}
 
-	if (CastProperty(&args[0], TYPE_COLOR, &prop) < 0) {
+	if (value_Cast(&args[0], TYPE_COLOR, &value) < 0) {
 		return -1;
 	}
 
-	renderer_SetDrawColor(renderer_Default(), prop.value.color);
+	renderer_SetDrawColor(renderer_Default(), value.c);
 	(void) result;
 	return 0;
 }
 
-static int SystemSetParent(Property *args, Uint32 numArgs, Property *result)
+static int SystemSetParent(Value *args, Uint32 numArgs, Value *result)
 {
-	View *p, *v;
-
-	if (numArgs != 2 || !IsPropertyObject(&args[0], "View") ||
-			!IsPropertyObject(&args[1], "View")) {
+	if (numArgs != 2 || args[0].type != TYPE_VIEW ||
+			args[1].type != TYPE_VIEW) {
 		return -1;
 	}
-	v = args[0].value.object.data;
-	p = args[1].value.object.data;
-	view_SetParent(v, p);
+	view_SetParent(args[0].v, args[1].v);
 	(void) result;
 	return 0;
 }
 
-static int SystemGetProperty(Property *args, Uint32 numArgs, Property *result)
+static int SystemGetProperty(Value *args, Uint32 numArgs, Value *result)
 {
-	View *v;
-	char *s;
-	Property *prop;
+	View *view;
+	char *str;
 	Value *pValue;
 
-	if (numArgs != 2 || !IsPropertyObject(&args[0], "View") ||
+	if (numArgs != 2 || args[0].type != TYPE_VIEW ||
 			args[1].type != TYPE_STRING) {
 		return -1;
 	}
-	v = args[0].value.object.data;
-	s = WordTerminate(&args[1].value.s);
-	if (s == NULL) {
+	view = args[0].v;
+	str = WordTerminate(args[1].s);
+	if (str == NULL) {
 		return -1;
 	}
-	prop = _SearchVariable(v, s, &pValue);
-	if (prop == NULL) {
+	if (_SearchVariable(view, str, &pValue) == NULL) {
 		return -1;
 	}
-	result->type = prop->type;
-	result->value = *pValue;
+	*result = *pValue;
 	return 0;
 }
 
-static int SystemSetProperty(Property *args, Uint32 numArgs, Property *result)
+static int SystemSetProperty(Value *args, Uint32 numArgs, Value *result)
 {
-	View *v;
-	char *s;
+	View *view;
+	char *str;
 	Value *pValue;
-	Property *prop;
-	Property out;
+	Value out;
 
-	if (numArgs != 3 || !IsPropertyObject(&args[0], "View") ||
+	if (numArgs != 3 || args[0].type != TYPE_VIEW ||
 			args[1].type != TYPE_STRING) {
 		return -1;
 	}
-	v = args[0].value.object.data;
-	s = WordTerminate(&args[1].value.s);
-	if (s == NULL) {
+	view = args[0].v;
+	str = WordTerminate(args[1].s);
+	if (str == NULL) {
 		return -1;
 	}
-	prop = _SearchVariable(v, s, &pValue);
-	if (prop == NULL) {
+	if (_SearchVariable(view, str, &pValue) == NULL) {
 		return -1;
 	}
-	if (CastProperty(&args[2], prop->type, &out) < 0) {
+	if (value_Cast(&args[2], pValue->type, &out) < 0) {
 		return -1;
 	}
-	*pValue = out.value;
+	*pValue = out;
 	(void) result;
 	return 0;
 }
 
-static int SystemFillRect(Property *args, Uint32 numArgs, Property *result)
+static int SystemFillRect(Value *args, Uint32 numArgs, Value *result)
 {
 	Rect r;
 
@@ -1011,129 +973,98 @@ static int SystemFillRect(Property *args, Uint32 numArgs, Property *result)
 	return 0;
 }
 
-static int SystemGetRect(Property *args, Uint32 numArgs, Property *result)
+static int SystemGetRect(Value *args, Uint32 numArgs, Value *result)
 {
-	if (numArgs != 1) {
+	if (numArgs != 1 || args[0].type != TYPE_VIEW) {
 		return -1;
 	}
-
-	if (!IsPropertyObject(&args[0], "View")) {
-		return -1;
-	}
-
-	View *const view = args[0].value.object.data;
-	result->type = TYPE_OBJECT;
-	result->value.object.class = environment_FindClass("Rect");
-	result->value.object.data = AllocObject(result->value.object.class);
-	if (result->value.object.data == NULL) {
-		return -1;
-	}
-	memcpy(result->value.object.data, &view->rect, sizeof(view->rect));
+	result->type = TYPE_RECT;
+	result->r = args[0].v->rect;
 	return 0;
 }
 
 
-static int SystemSetRect(Property *args, Uint32 numArgs, Property *result)
+static int SystemSetRect(Value *args, Uint32 numArgs, Value *result)
 {
-	Rect r;
-
-	if (numArgs == 0) {
+	if (numArgs == 0 || args[0].type != TYPE_VIEW) {
 		return -1;
 	}
-
-	if (!IsPropertyObject(&args[0], "View")) {
+	if (args_GetRect(&args[1], numArgs - 1, &args[0].v->rect) < 0) {
 		return -1;
 	}
-
-	View *const view = args[0].value.object.data;
-
-	if (args_GetRect(&args[1], numArgs - 1, &r) < 0) {
-		return -1;
-	}
-	view->rect = r;
 	(void) result;
 	return 0;
 }
 
-static int SystemGetWindowWidth(Property *args, Uint32 numArgs, Property *result)
+static int SystemGetWindowWidth(Value *args, Uint32 numArgs, Value *result)
 {
 	(void) args;
 	if (numArgs != 0) {
 		return -1;
 	}
 	result->type = TYPE_INTEGER;
-	result->value.i = gui_GetWindowWidth();
+	result->i = gui_GetWindowWidth();
 	return 0;
 }
 
-static int SystemGetWindowHeight(Property *args, Uint32 numArgs, Property *result)
+static int SystemGetWindowHeight(Value *args, Uint32 numArgs, Value *result)
 {
 	(void) args;
 	if (numArgs != 0) {
 		return -1;
 	}
 	result->type = TYPE_INTEGER;
-	result->value.i = gui_GetWindowHeight();
+	result->i = gui_GetWindowHeight();
 	return 0;
 }
 
-static int SystemGetType(Property *args, Uint32 numArgs, Property *result)
+static int SystemGetType(Value *args, Uint32 numArgs, Value *result)
 {
-	Event *e;
-
-	if (numArgs == 0 || !IsPropertyObject(&args[0], "Event")) {
+	if (numArgs == 0 || args[0].type != TYPE_EVENT) {
 		return -1;
 	}
-	e = args[0].value.object.data;
 	result->type = TYPE_INTEGER;
-	result->value.i = e->type;
+	result->i = args[0].e.event;
 	return 0;
 }
 
-static int SystemGetPos(Property *args, Uint32 numArgs, Property *result)
+static int SystemGetPos(Value *args, Uint32 numArgs, Value *result)
 {
-	Event *e;
-	Point *p;
+	EventInfo *info;
 
-	if (numArgs == 0 || !IsPropertyObject(&args[0], "Event")) {
+	if (numArgs == 0 || args[0].type != TYPE_EVENT) {
 		return -1;
 	}
-	e = args[0].value.object.data;
-	result->type = TYPE_OBJECT;
-	result->value.object.class = environment_FindClass("Point");
-	p = AllocObject(result->value.object.class);
-	if (p == NULL) {
-		return -1;
-	}
-	p->x = e->info.mi.x;
-	p->y = e->info.mi.y;
-	result->value.object.data = p;
+	info = &args[0].e.info;
+	result->type = TYPE_POINT;
+	result->p.x = info->mi.x;
+	result->p.y = info->mi.y;
 	return 0;
 }
 
-static int SystemGetButton(Property *args, Uint32 numArgs, Property *result)
+static int SystemGetButton(Value *args, Uint32 numArgs, Value *result)
 {
-	Event *e;
 
-	if (numArgs == 0 || !IsPropertyObject(&args[0], "Event")) {
+	if (numArgs == 0 || args[0].type != TYPE_EVENT) {
 		return -1;
 	}
-	e = args[0].value.object.data;
 	result->type = TYPE_INTEGER;
-	result->value.i = e->info.mi.button;
+	result->i = args[0].e.info.mi.button;
 	return 0;
 }
 
 static int ExecuteSystem(const char *call,
-		Instruction *args, Uint32 numArgs, Property *result)
+		Instruction *args, Uint32 numArgs, Value *result)
 {
 	static const struct system_function {
 		const char *name;
-		int (*call)(Property *args, Uint32 numArgs, Property *result);
+		int (*call)(Value *args, Uint32 numArgs, Value *result);
 	} functions[] = {
 		/* TODO: add more system functions */
 		{ "and", SystemAnd },
 		{ "equals", SystemEquals },
+		{ "get", SystemGet },
+		{ "insert", SystemInsert },
 		{ "not", SystemNot },
 		{ "or", SystemOr },
 		{ "print", SystemPrint },
@@ -1141,10 +1072,9 @@ static int ExecuteSystem(const char *call,
 		{ "sum", SystemSum },
 
 		{ "Contains", SystemContains },
+		{ "CreateView", SystemCreateView },
 		{ "FillRect", SystemFillRect },
 		{ "GetButton", SystemGetButton },
-		{ "GetClass", SystemGetClass },
-		{ "GetObject", SystemGetObject },
 		{ "GetParent", SystemGetParent },
 		{ "GetPos", SystemGetPos },
 		{ "GetProperty", SystemGetProperty },
@@ -1170,20 +1100,20 @@ static int ExecuteSystem(const char *call,
 		return -1;
 	}
 
-	Property props[numArgs];
+	Value values[numArgs];
 	for (Uint32 i = 0; i < numArgs; i++) {
-		if (EvaluateInstruction(&args[i], &props[i]) < 0) {
+		if (EvaluateInstruction(&args[i], &values[i]) < 0) {
 			return -1;
 		}
 	}
-	return sys->call(props, numArgs, result);
+	return sys->call(values, numArgs, result);
 }
 
 static int MergeWithLabel(const RawWrapper *wrapper)
 {
 	Property *newProperties;
 	RawProperty *raw;
-	Property prop;
+	Value val;
 
 	Label *const label = environment.label;
 	const Uint32 num = label->numProperties;
@@ -1197,22 +1127,25 @@ static int MergeWithLabel(const RawWrapper *wrapper)
 
 	for (Uint32 i = 0, j; i < wrapper->numProperties; i++) {
 		raw = &wrapper->properties[i];
-		if (EvaluateInstruction(&raw->instruction, &prop) < 0) {
+		if (EvaluateInstruction(&raw->instruction, &val) < 0) {
 			return -1;
 		}
 
 		for (j = 0; j < num; j++) {
 			Property *const labelProp = &label->properties[j];
 			if (strcmp(raw->name, labelProp->name) == 0) {
-				if (prop.type != labelProp->type) {
+				if (val.type != labelProp->value.type) {
 					return -1;
 				}
 			}
-			labelProp->value = prop.value;
+			labelProp->value = val;
 			break;
 		}
 		if (j == num) {
+			Property prop;
+
 			strcpy(prop.name, raw->name);
+			prop.value = val;
 			label->properties[label->numProperties++] = prop;
 		}
 	}

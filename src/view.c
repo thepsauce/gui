@@ -83,7 +83,7 @@ Value *view_GetProperty(View *view, type_t type, const char *name)
 {
 	for (Uint32 i = 0; i < view->label->numProperties; i++) {
 		Property *const prop = &view->label->properties[i];
-		if (type == prop->type && strcmp(prop->name, name) == 0) {
+		if (type == prop->value.type && strcmp(prop->name, name) == 0) {
 			return &view->values[i];
 		}
 	}
@@ -105,7 +105,7 @@ Uint32 view_GetColorProperty(View *view, const char *name)
 	if (prop == NULL) {
 		return 0;
 	}
-	return prop->color;
+	return prop->c;
 }
 
 int view_SetParent(View *view, View *parent)

@@ -13,22 +13,48 @@ Button:
 	.font = font default
 
 	.init = function {
-		print(string "Init\n")
-		;;; TODO: implement this in the parser
-		insert(text, string "hello")
-		insert(array, string "hey", string "bye")
+		print("Init\n")
+		; For tests ;
+		local s = "Hello"
+		for c in s print(c, " ") print("\n")
+		for i to 10 {
+			if equals(i, 5) {
+				break
+			}
+			print(i, " ")
+		}
+		print("\n")
+		for i from 3 to 7 print(i, " ") print("\n")
+		
 
-		print(string "array: ")
+		; TODO: Make it so text is not shared across all
+		components (very annoying) ;
+		local text = "Hello\n"
+		insert(text, "What is up?\n")
+		print(text)
+
+		local t = text
+		insert(t, "Break\n")
+		print(text) ; text is now modified ;
+		print("\n")
+
+		;;; TODO: implement this in the parser
+		local text = ""
+		local array = []
+		insert(text, "hello")
+		insert(array, "hey", "bye")
+
+		print("array: ")
 		for i to length(array) {
 			print(get(array, i))
 		}
-		print(string "\n")
+		print("\n")
 
-		print(string "text: ")
+		print("text: ")
 		for i from 0 to length(text) {
 			print(get(text, i))
 		}
-		print(string "\n")
+		print("\n")
 
 		for i in array {
 			print(i)
@@ -56,7 +82,7 @@ Button:
 		SetDrawColor(c)
 		FillRect(GetRect(this))
 	}
-	.event = function object Event e {
+	.event = function event e {
 		if equals(GetType(e), const EVENT_MOUSEMOVE) {
 			if Contains(GetRect(this), GetPos(e)) {
 				is_hovered = bool true
@@ -71,7 +97,7 @@ Button:
 			}
 		} else if equals(GetType(e), const EVENT_BUTTONUP) {
 			if and(is_pressed, is_hovered, not(has_spawned)) {
-				local b = new View("Button")
+				local b = CreateView("Button")
 				SetRect(b, rand(0, GetWindowWidth()),
 					rand(0, GetWindowHeight()), 30, 30)
 				SetParent(b, GetParent(this))

@@ -5,8 +5,3 @@ Text window: Dynamically change properties of objects.
 
 Still, everything should be done in C. All features of the property language are
 not for deploying, just for debugging and testing purposes.
-
-For the property language:
-Make the crossing between view and the property language. Maybe by storing
-instruction objects instead of property objects. This would mean the removal of
-Label and prop_Evaluate and its derivatives.
