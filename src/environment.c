@@ -299,8 +299,7 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 		environment.numStack = index;
 		break;
 	case INSTR_FORIN:
-		if (EvaluateInstruction(instr->forin.in, &in) < 0 ||
-				in.type != TYPE_STRING) {
+		if (EvaluateInstruction(instr->forin.in, &in)) {
 			return -1;
 		}
 		newStack = union_Realloc(union_Default(), environment.stack,
@@ -313,19 +312,35 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 		index = environment.numStack++;
 
 		strcpy(environment.stack[index].name, instr->forin.variable);
-		environment.stack[index].value.type = TYPE_INTEGER;
-		for (Sint64 i = 0; i < in.s->length; i++) {
-			environment.stack[index].value.i = in.s->data[i];
-			const int r = ExecuteInstruction(instr->forin.iter,
-					result);
-			if (r == 2) {
-				printf("REACHED BREAK\n");
-				environment.numStack = index;
-				return 0;
+		if (in.type == TYPE_ARRAY) {
+			for (Sint64 i = 0; i < in.a->numValues; i++) {
+				environment.stack[index].value = in.a->values[i];
+				const int r = ExecuteInstruction(instr->forin.iter,
+						result);
+				if (r == 2) {
+					environment.numStack = index;
+					return 0;
+				}
+				if (r != 0) {
+					return r;
+				}
 			}
-			if (r != 0) {
-				return r;
+		} else if (in.type == TYPE_STRING) {
+			environment.stack[index].value.type = TYPE_INTEGER;
+			for (Sint64 i = 0; i < in.s->length; i++) {
+				environment.stack[index].value.i = in.s->data[i];
+				const int r = ExecuteInstruction(instr->forin.iter,
+						result);
+				if (r == 2) {
+					environment.numStack = index;
+					return 0;
+				}
+				if (r != 0) {
+					return r;
+				}
 			}
+		} else {
+			return -1;
 		}
 		environment.numStack = index;
 		break;
@@ -589,7 +604,7 @@ static int SystemGet(Value *args, Uint32 numArgs, Value *result)
 	if (numArgs != 2) {
 		return -1;
 	}
-	if (value_Cast(&args[0], TYPE_INTEGER, &val) < 0 || val.i < 0) {
+	if (value_Cast(&args[1], TYPE_INTEGER, &val) < 0 || val.i < 0) {
 		return -1;
 	}
 	if (args[0].type == TYPE_ARRAY) {
@@ -626,7 +641,7 @@ static int SystemInsert(Value *args, Uint32 numArgs, Value *result)
 			return -1;
 		}
 		arr->values = newValues;
-		memcpy(&arr->values[1], &args[1],
+		memcpy(&arr->values[arr->numValues], &args[1],
 				sizeof(*arr->values) * (numArgs - 1));
 		arr->numValues += numArgs - 1;
 	} else if (args[0].type == TYPE_STRING) {
@@ -683,6 +698,22 @@ static int SystemInsert(Value *args, Uint32 numArgs, Value *result)
 		return -1;
 	}
 	(void) result;
+	return 0;
+}
+
+static int SystemLength(Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs != 1) {
+		return -1;
+	}
+	result->type = TYPE_INTEGER;
+	if (args[0].type == TYPE_ARRAY) {
+		result->i = args[0].a->numValues;
+	} else if (args[0].type == TYPE_STRING) {
+		result->i = args[0].s->length;
+	} else {
+		return -1;
+	}
 	return 0;
 }
 
@@ -1065,6 +1096,7 @@ static int ExecuteSystem(const char *call,
 		{ "equals", SystemEquals },
 		{ "get", SystemGet },
 		{ "insert", SystemInsert },
+		{ "length", SystemLength },
 		{ "not", SystemNot },
 		{ "or", SystemOr },
 		{ "print", SystemPrint },

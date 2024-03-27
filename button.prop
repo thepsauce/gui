@@ -14,18 +14,8 @@ Button:
 
 	.init = function {
 		print("Init\n")
-		; For tests ;
-		local s = "Hello"
-		for c in s print(c, " ") print("\n")
-		for i to 10 {
-			if equals(i, 5) {
-				break
-			}
-			print(i, " ")
-		}
-		print("\n")
-		for i from 3 to 7 print(i, " ") print("\n")
-		
+
+		; TESTS ;
 
 		; TODO: Make it so text is not shared across all
 		components (very annoying) ;
@@ -38,28 +28,36 @@ Button:
 		print(text) ; text is now modified ;
 		print("\n")
 
-		;;; TODO: implement this in the parser
 		local text = ""
-		local array = []
+		local arr = []
 		insert(text, "hello")
-		insert(array, "hey", "bye")
+		insert(arr, "hey", "bye")
 
-		print("array: ")
-		for i to length(array) {
-			print(get(array, i))
+		print("array: [")
+		for i to length(arr) {
+			if not(equals(i, 0)) print(",")
+			print(" ", get(arr, i))
 		}
-		print("\n")
+		print(" ]\n")
 
-		print("text: ")
+		print("again: [")
+		local b = bool false
+		for i in arr {
+			if b print(",")
+			print(" ", i)
+			b = bool true
+		}
+		print(" ]\n")
+
+		print("text bytes: ")
 		for i from 0 to length(text) {
+			if not(equals(i, 0)) print(", ")
 			print(get(text, i))
 		}
 		print("\n")
 
-		for i in array {
-			print(i)
-		}
-		;;;
+		print("again: ")
+		for c in text print(c, " ") print("\n")
 	}
 	.draw = function {
 		local c = color 0
@@ -77,7 +75,7 @@ Button:
 			}
 		}
 		if has_spawned {
-			c = rand(0, 1000000)
+			c = rand(0, 100000)
 		}
 		SetDrawColor(c)
 		FillRect(GetRect(this))
