@@ -487,10 +487,61 @@ static int ReadFont(struct parser *parser)
 	return -1;
 }
 
+static int ReadChar(struct parser *parser)
+{
+	int c;
+
+	if (parser->c != '\'') {
+		return -1;
+	}
+	NextChar(parser);
+	if(parser->c == '\\') {
+		NextChar(parser);
+		switch (parser->c) {
+		case 'a': c = '\a'; break;
+		case 'b': c = '\b'; break;
+		case 'f': c = '\f'; break;
+		case 'n': c = '\n'; break;
+		case 'r': c = '\r'; break;
+		case 't': c = '\t'; break;
+		case 'v': c = '\b'; break;
+		case 'x': {
+			int d1, d2;
+
+			d1 = HexToInt(NextChar(parser));
+			if (d1 < 0) {
+				return -1;
+			}
+			d2 = HexToInt(NextChar(parser));
+			if (d2 < 0) {
+				return -1;
+			}
+			c = (d1 << 4) | d2;
+			break;
+		}
+		default:
+			  c = parser->c;
+		}
+	} else {
+		c = parser->c;
+	}
+	NextChar(parser);
+	if (parser->c != '\'') {
+		return -1;
+	}
+	NextChar(parser);
+	parser->value.i = c;
+	return 0;
+}
+
 static int ReadInt(struct parser *parser)
 {
 	Sint64 sign;
 	Sint64 num = 0;
+
+	if (parser->c == '\'') {
+		return ReadChar(parser);
+	}
 
 	if (parser->c == '+') {
 		sign = 1;
@@ -1034,18 +1085,20 @@ static int ReadInstruction(struct parser *parser)
 		}
 		parser->value.type = TYPE_ARRAY;
 		parser->instruction.instr = INSTR_VALUE;
+		parser->instruction.value.value.type = parser->value.type;
 		parser->instruction.value.value = parser->value;
 		return 0;
 	}
 
 	/* implicit int type */
-	if (isdigit(parser->c)) {
+	if (isdigit(parser->c) || parser->c == '\'') {
 		if (ReadInt(parser) < 0) {
 			return -1;
 		}
 		parser->value.type = TYPE_INTEGER;
 		parser->instruction.instr = INSTR_VALUE;
-		parser->instruction.value.value = parser->value;
+		parser->instruction.value.value.type = parser->value.type;
+		parser->instruction.value.value.i = parser->value.i;
 		return 0;
 	}
 
@@ -1056,7 +1109,8 @@ static int ReadInstruction(struct parser *parser)
 		}
 		parser->value.type = TYPE_STRING;
 		parser->instruction.instr = INSTR_VALUE;
-		parser->instruction.value.value = parser->value;
+		parser->instruction.value.value.type = parser->value.type;
+		parser->instruction.value.value.s = parser->value.s;
 		return 0;
 	}
 

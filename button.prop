@@ -33,7 +33,7 @@ Button:
 		insert(text, "hello")
 		insert(arr, "hey", "bye")
 
-		print("array: [")
+		print("bool false: [")
 		for i to length(arr) {
 			if not(equals(i, 0)) print(",")
 			print(" ", get(arr, i))
