@@ -495,7 +495,7 @@ static int ReadChar(struct parser *parser)
 		return -1;
 	}
 	NextChar(parser);
-	if(parser->c == '\\') {
+	if (parser->c == '\\') {
 		NextChar(parser);
 		switch (parser->c) {
 		case 'a': c = '\a'; break;
@@ -970,6 +970,36 @@ static int ReadTrigger(struct parser *parser)
 	return 0;
 }
 
+static int ReadWhile(struct parser *parser)
+{
+	Instruction *cond;
+	Instruction *iter;
+
+	if (ReadInstruction(parser) < 0) {
+		return -1;
+	}
+	cond = union_Alloc(union_Default(), sizeof(*cond));
+	if (cond == NULL) {
+		return -1;
+	}
+	*cond = parser->instruction;
+
+	SkipSpace(parser);
+	if (ReadInstruction(parser) < 0) {
+		return -1;
+	}
+	iter = union_Alloc(union_Default(), sizeof(*iter));
+	if (iter == NULL) {
+		return -1;
+	}
+	*iter = parser->instruction;
+
+	parser->instruction.instr = INSTR_WHILE;
+	parser->instruction.whilee.condition = cond;
+	parser->instruction.whilee.iter = iter;
+	return 0;
+}
+
 static int _ReadValue(struct parser *parser, type_t type)
 {
 	static int (*const reads[])(struct parser *parser) = {
@@ -1065,6 +1095,7 @@ static int ReadInstruction(struct parser *parser)
 		{ "return", ReadReturn },
 		{ "this", ReadThis },
 		{ "trigger", ReadTrigger },
+		{ "while", ReadWhile },
 	};
 
 	if (parser->c == '{') {
@@ -1177,23 +1208,6 @@ static int ReadInstruction(struct parser *parser)
 	return 0;
 }
 
-static int ReadLabel(struct parser *parser)
-{
-	long prevLine;
-
-	if (ReadWord(parser) < 0) {
-		return -1;
-	}
-	prevLine = parser->line;
-	SkipSpace(parser);
-	if (parser->c != ':' && prevLine == parser->line) {
-		return -1;
-	}
-	NextChar(parser);
-	strcpy(parser->label, parser->word);
-	return 0;
-}
-
 static int ReadProperty(struct parser *parser)
 {
 	if (parser->c != '.') {
@@ -1239,8 +1253,8 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 	Union *defUni;
 	Uint32 numPtrs;
 	struct parser parser;
-	RawWrapper *wrappers = NULL, *newWrappers;
-	Uint32 numWrappers = 0;
+	RawWrapper *wrappers, *newWrappers;
+	Uint32 numWrappers;
 
 	/* this is for convenience:
 	 * all parser functions allocate memory using the default union
@@ -1252,10 +1266,19 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 	numPtrs = defUni->numPointers;
 
 	memset(&parser, 0, sizeof(parser));
+
 	union_Init(&parser.uni, SIZE_MAX);
-	parser.file = file;
+
+	wrappers = union_Alloc(&parser.uni, sizeof(*wrappers));
+	if (wrappers == NULL) {
+		return -1;
+	}
+	numWrappers = 1;
+	memset(wrappers, 0, sizeof(*wrappers));
+
 	/* we buffer ourselves */
 	setvbuf(file, NULL, _IONBF, 0);
+	parser.file = file;
 
 	NextChar(&parser);
 
@@ -1275,19 +1298,38 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 			continue;
 		}
 
-		if (ReadLabel(&parser) < 0) {
-			goto fail;
+		if (ReadWord(&parser) < 0) {
+			return -1;
 		}
-		newWrappers = union_Realloc(&parser.uni, wrappers,
-				sizeof(*wrappers) * (numWrappers + 1));
-		if (newWrappers == NULL) {
-			goto fail;
+		SkipSpace(&parser);
+		if (parser.c == ':') {
+			NextChar(&parser);
+			strcpy(parser.label, parser.word);
+			newWrappers = union_Realloc(&parser.uni, wrappers,
+					sizeof(*wrappers) * (numWrappers + 1));
+			if (newWrappers == NULL) {
+				goto fail;
+			}
+			wrappers = newWrappers;
+			strcpy(wrappers[numWrappers].label, parser.label);
+			wrappers[numWrappers].properties = NULL;
+			wrappers[numWrappers].numProperties = 0;
+			numWrappers++;
+		} else if (parser.c == '=') {
+			strcpy(parser.property.name, parser.word);
+			NextChar(&parser); /* skip '=' */
+			SkipSpace(&parser);
+			if (ReadInstruction(&parser) < 0) {
+				return -1;
+			}
+			parser.property.instruction = parser.instruction;
+			if (wrapper_AddProperty(&parser.uni,
+						&wrappers[0],
+						&parser.property) < 0) {
+				goto fail;
+			}
+			continue;
 		}
-		wrappers = newWrappers;
-		strcpy(wrappers[numWrappers].label, parser.label);
-		wrappers[numWrappers].properties = NULL;
-		wrappers[numWrappers].numProperties = 0;
-		numWrappers++;
 	}
 	*uni = parser.uni;
 	*pWrappers = wrappers;

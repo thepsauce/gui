@@ -11,7 +11,7 @@ syn match PropertyTodo "TODO:" containedin=PropertyComment
 hi link PropertyComment Comment
 hi link PropertyTodo Todo
 
-syn keyword PropertyKeywords for if else in from to local const
+syn keyword PropertyKeywords for if else in from to local const return this trigger break while
 
 hi link PropertyKeywords Statement
 

@@ -195,6 +195,7 @@ typedef enum {
 	INSTR_TRIGGER,
 	INSTR_VALUE,
 	INSTR_VARIABLE,
+	INSTR_WHILE,
 } instr_t;
 
 struct instruction;
@@ -309,6 +310,11 @@ struct instr_variable {
 	char name[MAX_WORD];
 };
 
+struct instr_while {
+	struct instruction *condition;
+	struct instruction *iter;
+};
+
 typedef struct instruction {
 	instr_t instr;
 	union {
@@ -324,6 +330,7 @@ typedef struct instruction {
 		struct instr_trigger trigger;
 		struct instr_value value;
 		struct instr_variable variable;
+		struct instr_while whilee;
 	};
 } Instruction;
 

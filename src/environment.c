@@ -1,12 +1,16 @@
 #include "gui.h"
 
+Label global_label;
+
 static struct environment {
 	Label *label; /* first label in the linked list */
 	Label *cur; /* selected label */
 	View *view; /* current view */
 	Property *stack;
 	Uint32 numStack;
-} environment;
+} environment = {
+	.label = &global_label
+};
 
 static int ExecuteSystem(const char *call,
 		Instruction *args, Uint32 numArgs, Value *result);
@@ -95,16 +99,34 @@ static Property *_SearchVariable(View *view, const char *name, Value **pValue)
 
 static Property *SearchVariable(const char *name, Value **pValue)
 {
+	Property *prop;
+
 	for (Uint32 i = environment.numStack; i > 0; ) {
 		i--;
-		if (strcmp(environment.stack[i].name, name) == 0) {
+		prop = &environment.stack[i];
+		if (strcmp(prop->name, name) == 0) {
 			if (pValue != NULL) {
 				*pValue = &environment.stack[i].value;
 			}
-			return &environment.stack[i];
+			return prop;
 		}
 	}
-	return _SearchVariable(environment.view, name, pValue);
+
+	prop = _SearchVariable(environment.view, name, pValue);
+	if (prop != NULL) {
+		return prop;
+	}
+
+	for (Uint32 i = 0; i < global_label.numProperties; i++) {
+		prop = &global_label.properties[i];
+		if (strcmp(prop->name, name) == 0) {
+			if (pValue != NULL) {
+				*pValue = &prop->value;
+			}
+			return prop;
+		}
+	}
+	return NULL;
 }
 
 static int StandardProc(View *view, event_t event, EventInfo *info)
@@ -214,6 +236,7 @@ static int EvaluateInstruction(Instruction *instr, Value *result)
 	case INSTR_RETURN:
 	case INSTR_SET:
 	case INSTR_TRIGGER:
+	case INSTR_WHILE:
 		return -1;
 	case INSTR_INVOKE:
 		var = SearchVariable(instr->invoke.name, NULL);
@@ -427,6 +450,29 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 					instr->invoke.args,
 					instr->invoke.numArgs, result) < 0) {
 			return -1;
+		}
+		break;
+	case INSTR_WHILE:
+		b = true;
+		while (b) {
+			if (EvaluateInstruction(instr->whilee.condition,
+						result) < 0) {
+				return -1;
+			}
+			if (result->type == TYPE_INTEGER) {
+				b = !!result->i;
+			} else if (result->type == TYPE_BOOL) {
+				b = result->b;
+			} else {
+				return -1;
+			}
+			if (!b) {
+				break;
+			}
+			const int r = ExecuteInstruction(instr->whilee.iter, result);
+			if (r != 0) {
+				return r;
+			}
 		}
 		break;
 	}
@@ -1147,7 +1193,7 @@ static int MergeWithLabel(const RawWrapper *wrapper)
 	RawProperty *raw;
 	Value val;
 
-	Label *const label = environment.label;
+	Label *const label = environment.cur;
 	const Uint32 num = label->numProperties;
 	newProperties = union_Realloc(union_Default(), label->properties,
 			sizeof(*label->properties) *
@@ -1207,15 +1253,10 @@ Label *environment_AddLabel(const char *name)
 	}
 	memset(label, 0, sizeof(*label));
 	strcpy(label->name, name);
-	last = environment.label;
-	if (last == NULL) {
-		environment.label = label;
-		environment.cur = label;
-	} else {
-		for (last = environment.cur; last->next != NULL; ) {
-			last = last->next;
-		}
+	for (last = environment.label; last->next != NULL; ) {
+		last = last->next;
 	}
+	last->next = label;
 	label->proc = StandardProc;
 	return label;
 }

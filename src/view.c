@@ -81,8 +81,9 @@ int view_Send(View *view, event_t type, EventInfo *info)
 
 Value *view_GetProperty(View *view, type_t type, const char *name)
 {
-	for (Uint32 i = 0; i < view->label->numProperties; i++) {
-		Property *const prop = &view->label->properties[i];
+	Label *const label = view->label;
+	for (Uint32 i = 0; i < label->numProperties; i++) {
+		Property *const prop = &label->properties[i];
 		if (type == prop->value.type && strcmp(prop->name, name) == 0) {
 			return &view->values[i];
 		}

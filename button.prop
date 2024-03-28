@@ -1,3 +1,12 @@
+main = function {
+	while bool true {
+		
+	}
+	return 0
+}
+
+glob = 32
+
 Button:
 	.background = color 0x60609f
 	.away = color red
@@ -16,6 +25,12 @@ Button:
 		print("Init\n")
 
 		; TESTS ;
+
+		local i = 0
+		while not(equals(i, 10)) {
+			i = sum(i, 1)
+			print(i, "\n")
+		}
 
 		; TODO: Make it so text is not shared across all
 		components (very annoying) ;
