@@ -171,6 +171,219 @@ static type_t CheckType(struct parser *parser)
 static int ReadInt(struct parser *parser);
 static int ReadValue(struct parser *parser);
 
+struct int_or_float {
+	int radix;
+	Sint64 sign;
+	Sint64 front, back;
+	Sint64 fShift, bShift;
+};
+
+#define IOF_SHIFT(n, r, s) ({ \
+	__auto_type _n = (n); \
+	const __auto_type _r = (r); \
+	const __auto_type _s = (s); \
+	if (_s > 0) { \
+		for (Sint64 i = 0; i < _s; i++) { \
+			_n *= _r; \
+		} \
+	} else { \
+		for (Sint64 i = _s; i < 0; i++) { \
+			_n /= _r; \
+		} \
+	} \
+	_n; \
+})
+
+static Sint64 iof_AsInt(const struct int_or_float *iof)
+{
+	Sint64 front, back;
+
+	front = IOF_SHIFT(iof->front, iof->radix, iof->fShift);
+	back = IOF_SHIFT(iof->back, iof->radix, iof->bShift);
+	return iof->sign * (front + back);
+}
+
+static float iof_AsFloat(const struct int_or_float *iof)
+{
+	float front, back;
+
+	front = IOF_SHIFT((float) iof->front, (float) iof->radix, iof->fShift);
+	back = IOF_SHIFT((float) iof->back, (float) iof->radix, iof->bShift);
+	return iof->sign * (front + back);
+}
+
+static void iof_AsPrecise(const struct int_or_float *iof, Value *value)
+{
+	if (iof->fShift >= 0 && iof->bShift >= 0 && iof->back == 0) {
+		value->type = TYPE_INTEGER;
+		value->i = iof->sign * iof->front;
+		for (Sint64 i = 0; i < iof->fShift; i++) {
+			value->i *= iof->radix;
+		}
+	} else {
+		value->type = TYPE_FLOAT;
+		value->f = iof_AsFloat(iof);
+	}
+}
+
+static inline bool isrdigit(int c, int radix)
+{
+	switch (radix) {
+	case 2:
+		return c == '0' || c == '1';
+	case 8:
+		return c >= '0' && c <= '7';
+	case 10:
+		return isdigit(c);
+	case 16:
+		return isxdigit(c);
+	}
+	return false;
+}
+
+static int ReadIntOrFloat(struct parser *parser, struct int_or_float *iof)
+{
+	int c;
+	Sint64 front = 0, back = 0;
+	Uint32 nFront = 0, nBack = 0;
+	Sint64 exponent;
+
+	iof->radix = 10;
+	iof->front = 0;
+	iof->back = 0;
+	iof->fShift = 0;
+	iof->bShift = 0;
+	if (parser->c == '+') {
+		iof->sign = 1;
+		NextChar(parser);
+	} else if (parser->c == '-') {
+		iof->sign = -1;
+		NextChar(parser);
+	} else {
+		iof->sign = 1;
+	}
+
+	if (parser->c == '\'') {
+		NextChar(parser);
+		if (parser->c == '\\') {
+			NextChar(parser);
+			switch (parser->c) {
+			case 'a': c = '\a'; break;
+			case 'b': c = '\b'; break;
+			case 'f': c = '\f'; break;
+			case 'n': c = '\n'; break;
+			case 'r': c = '\r'; break;
+			case 't': c = '\t'; break;
+			case 'v': c = '\b'; break;
+			case 'x': {
+				int d1, d2;
+
+				d1 = HexToInt(NextChar(parser));
+				if (d1 < 0) {
+					return -1;
+				}
+				d2 = HexToInt(NextChar(parser));
+				if (d2 < 0) {
+					return -1;
+				}
+				c = (d1 << 4) | d2;
+				break;
+			}
+			default:
+				c = parser->c;
+			}
+		} else {
+			c = parser->c;
+		}
+		NextChar(parser);
+		if (parser->c != '\'') {
+			return -1;
+		}
+		NextChar(parser);
+		iof->front = c;
+		return 0;
+	}
+
+	if (parser->c == '0') {
+		switch (NextChar(parser)) {
+		case 'X':
+		case 'x':
+			iof->radix = 16;
+			break;
+		case 'O':
+		case 'o':
+			iof->radix = 8;
+			break;
+		case 'B':
+		case 'b':
+			iof->radix = 2;
+			break;
+		default:
+			nFront = 1;
+		}
+		if (iof->radix != 10) {
+			NextChar(parser);
+		}
+	}
+
+	while (c = parser->c, isrdigit(c, iof->radix)) {
+		if (iof->radix == 16 && c > '9') {
+			c = tolower(c) - 'a' + 0xa;
+		} else {
+			c -= '0';
+		}
+		front *= iof->radix;
+		front += c;
+		nFront++;
+		NextChar(parser);
+	}
+
+	if (parser->c == '.') {
+		while (c = NextChar(parser), isrdigit(c, iof->radix)) {
+			if (iof->radix == 16 && c > '9') {
+				c = tolower(c) - 'a' + 0xa;
+			} else {
+				c -= '0';
+			}
+			back *= iof->radix;
+			back += c;
+			nBack++;
+		}
+	}
+
+	if (nFront == 0 && nBack == 0) {
+		return -1;
+	}
+
+	exponent = 0;
+	if (parser->c == 'e' || parser->c == 'E') {
+		Sint64 signExponent;
+
+		NextChar(parser);
+		if (parser->c == '+') {
+			signExponent = 1;
+			NextChar(parser);
+		} else if (parser->c == '-') {
+			signExponent = -1;
+			NextChar(parser);
+		} else {
+			signExponent = 1;
+		}
+		while (isdigit(parser->c)) {
+			exponent *= 10;
+			exponent += parser->c - '0';
+			NextChar(parser);
+		}
+		exponent *= signExponent;
+	}
+
+	iof->fShift = exponent;
+	iof->bShift = exponent - nBack;
+	iof->front = front;
+	iof->back = back;
+	return 0;
+}
+
 static int ReadArray(struct parser *parser)
 {
 	struct value_array *arr;
@@ -255,21 +468,27 @@ static int ReadColor(struct parser *parser)
 		{ "navy", 0x000080 }
 	};
 
-	if (isdigit(parser->c)) {
-		return ReadInt(parser);
-	}
 	if (isalpha(parser->c)) {
 		if (ReadWord(parser) < 0) {
 			return -1;
 		}
+		/* TODO: maybe handle rgb value (with rgb keyword) */
 		for (size_t i = 0; i < ARRLEN(colors); i++) {
 			if (strcmp(colors[i].name, parser->word) == 0) {
 				parser->value.c = colors[i].color;
 				return 0;
 			}
 		}
+		return -1;
+	} else {
+		struct int_or_float iof;
+
+		if (ReadIntOrFloat(parser, &iof) < 0) {
+			return -1;
+		}
+		parser->value.c = iof_AsInt(&iof);
 	}
-	return -1;
+	return 0;
 }
 
 static int ReadKeyDown(struct parser *parser)
@@ -313,79 +532,12 @@ static int ReadEvent(struct parser *parser)
 
 static int ReadFloat(struct parser *parser)
 {
-	Sint32 sign;
-	float front = 0, back = 0;
-	Sint32 nFront = 0, nBack = 0;
-	Sint32 signExponent = 0;
-	Sint32 exponent = 0;
+	struct int_or_float iof;
 
-	if (parser->c == '+') {
-		sign = 1;
-		NextChar(parser);
-	} else if (parser->c == '-') {
-		sign = -1;
-		NextChar(parser);
-	} else {
-		sign = 1;
-	}
-
-	while (isdigit(parser->c)) {
-		front *= 10;
-		front += parser->c - '0';
-		nFront++;
-		NextChar(parser);
-	}
-	if (parser->c == '.') {
-		NextChar(parser);
-		while (isdigit(parser->c)) {
-			back *= 10;
-			back += parser->c - '0';
-			nBack++;
-			NextChar(parser);
-		}
-	}
-	if (nFront == 0 && nBack == 0) {
+	if (ReadIntOrFloat(parser, &iof) < 0) {
 		return -1;
 	}
-
-	if (parser->c == 'e' || parser->c == 'E') {
-		NextChar(parser);
-		if (parser->c == '+') {
-			signExponent = 1;
-			NextChar(parser);
-		} else if (parser->c == '-') {
-			signExponent = -1;
-			NextChar(parser);
-		} else {
-			signExponent = 1;
-		}
-		while (isdigit(parser->c)) {
-			exponent *= 10;
-			exponent += parser->c - '0';
-			NextChar(parser);
-		}
-	}
-
-	exponent *= signExponent;
-	if (nBack > exponent) {
-		for (Sint32 i = exponent; i < nBack; i++) {
-			back /= 10;
-		}
-	} else {
-		for (Sint32 i = nBack; i < exponent; i++) {
-			back *= 10;
-		}
-	}
-	if (exponent < 0) {
-		for (Sint32 i = exponent; i < 0; i++) {
-			front /= 10;
-		}
-	} else {
-		for (Sint32 i = 0; i < exponent; i++) {
-			front *= 10;
-		}
-	}
-	parser->value.f = sign * (front + back);
+	parser->value.f = iof_AsFloat(&iof);
 	return 0;
 }
 
@@ -488,106 +640,14 @@ static int ReadFont(struct parser *parser)
 	return -1;
 }
 
-static int ReadChar(struct parser *parser)
-{
-	int c;
-
-	if (parser->c != '\'') {
-		return -1;
-	}
-	NextChar(parser);
-	if (parser->c == '\\') {
-		NextChar(parser);
-		switch (parser->c) {
-		case 'a': c = '\a'; break;
-		case 'b': c = '\b'; break;
-		case 'f': c = '\f'; break;
-		case 'n': c = '\n'; break;
-		case 'r': c = '\r'; break;
-		case 't': c = '\t'; break;
-		case 'v': c = '\b'; break;
-		case 'x': {
-			int d1, d2;
-
-			d1 = HexToInt(NextChar(parser));
-			if (d1 < 0) {
-				return -1;
-			}
-			d2 = HexToInt(NextChar(parser));
-			if (d2 < 0) {
-				return -1;
-			}
-			c = (d1 << 4) | d2;
-			break;
-		}
-		default:
-			  c = parser->c;
-		}
-	} else {
-		c = parser->c;
-	}
-	NextChar(parser);
-	if (parser->c != '\'') {
-		return -1;
-	}
-	NextChar(parser);
-	parser->value.i = c;
-	return 0;
-}
-
 static int ReadInt(struct parser *parser)
 {
-	Sint64 sign;
-	Sint64 num = 0;
-
-	if (parser->c == '\'') {
-		return ReadChar(parser);
-	}
-
-	if (parser->c == '+') {
-		sign = 1;
-		NextChar(parser);
-	} else if (parser->c == '-') {
-		sign = -1;
-		NextChar(parser);
-	} else {
-		sign = 1;
-	}
-
-	if (!isdigit(parser->c)) {
+	struct int_or_float iof;
+	if (ReadIntOrFloat(parser, &iof) < 0) {
 		return -1;
 	}
-
-	if (parser->c == '0') {
-		int c;
-
-		c = tolower(NextChar(parser));
-		if (c == 'x') {
-			while (c = NextChar(parser),
-					(c = HexToInt(c)) >= 0) {
-				num <<= 4;
-				num += c;
-			}
-		} else if (c == 'o') {
-			while (c = NextChar(parser), c >= '0' &&
-					c < '8') {
-				num <<= 3;
-				num += c - '0';
-			}
-		} else if (c == 'b') {
-			while (c = NextChar(parser), c >= '0' &&
-					c < '1') {
-				num <<= 1;
-				num += c - '0';
-			}
-		}
-	} else {
-		do {
-			num *= 10;
-			num += parser->c - '0';
-		} while (NextChar(parser), isdigit(parser->c));
-	}
-	parser->value.i = sign * num;
+	parser->value.type = TYPE_INTEGER;
+	parser->value.i = iof_AsInt(&iof);
 	return 0;
 }
 
@@ -1026,6 +1086,7 @@ static int _ReadValue(struct parser *parser, type_t type)
 
 static int ReadValue(struct parser *parser)
 {
+	struct int_or_float iof;
 	type_t type;
 
 	if (isalpha(parser->c)) {
@@ -1036,14 +1097,15 @@ static int ReadValue(struct parser *parser)
 		if (type == TYPE_NULL) {
 			return -1;
 		}
-	} else if (isdigit(parser->c)) {
-		type = TYPE_INTEGER;
-	} else if (parser->c == '\"') {
-		type = TYPE_STRING;
 	} else if (parser->c == '[') {
 		type = TYPE_ARRAY;
-	} else {
+	} else if (parser->c == '\"') {
+		type = TYPE_STRING;
+	} else if (ReadIntOrFloat(parser, &iof) < 0) {
 		return -1;
+	} else {
+		iof_AsPrecise(&iof, &parser->value);
+		return 0;
 	}
 	parser->value.type = type;
 	return _ReadValue(parser, type);
@@ -1123,24 +1185,13 @@ static int ReadInstruction(struct parser *parser)
 		return 0;
 	}
 
-	/* implicit int type */
-	if (isdigit(parser->c) || parser->c == '\'') {
-		if (ReadInt(parser) < 0) {
-			return -1;
-		}
-		parser->value.type = TYPE_INTEGER;
-		parser->instruction.instr = INSTR_VALUE;
-		parser->instruction.value.value.type = parser->value.type;
-		parser->instruction.value.value.i = parser->value.i;
-		return 0;
-	}
-
 	/* implicit string type */
 	if (parser->c == '\"') {
 		if (ReadString(parser) < 0) {
 			return -1;
 		}
 		parser->value.type = TYPE_STRING;
+
 		parser->instruction.instr = INSTR_VALUE;
 		parser->instruction.value.value.type = parser->value.type;
 		parser->instruction.value.value.s = parser->value.s;
@@ -1148,7 +1199,15 @@ static int ReadInstruction(struct parser *parser)
 	}
 
 	if (ReadWord(parser) < 0) {
-		return -1;
+		struct int_or_float iof;
+
+		if (ReadIntOrFloat(parser, &iof) < 0) {
+			return -1;
+		}
+		iof_AsPrecise(&iof, &parser->value);
+		parser->instruction.instr = INSTR_VALUE;
+		parser->instruction.value.value = parser->value;
+		return 0;
 	}
 	SkipSpace(parser);
 	const type_t type = CheckType(parser);
@@ -1301,7 +1360,7 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 		}
 
 		if (ReadWord(&parser) < 0) {
-			return -1;
+			goto fail;
 		}
 		SkipSpace(&parser);
 		if (parser.c == ':') {
@@ -1322,7 +1381,7 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 			NextChar(&parser); /* skip '=' */
 			SkipSpace(&parser);
 			if (ReadInstruction(&parser) < 0) {
-				return -1;
+				goto fail;
 			}
 			parser.property.instruction = parser.instruction;
 			if (wrapper_AddProperty(&parser.uni,
