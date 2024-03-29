@@ -1,11 +1,67 @@
-main = function {
-	while bool true {
-		
+glob = 32
+
+test = function {
+	local a = file("button.prop")
+	if exists(a) {
+		print(name(a), " exists:\n")
+		print(a, "\n")
 	}
-	return 0
+
+	print("Init\n")
+
+	local i = 0
+	while not(equals(i, 10)) {
+		i = sum(i, 1)
+		print(i, "\n")
+	}
+
+	; "Hello\n" is stored static, dup has to be used
+	to modify it ;
+	local text = dup("Hello\n")
+	insert(text, "What is up?\n")
+	print(text)
+
+	local t = text
+	insert(t, "Break\n")
+	print(text) ; text is now modified ;
+	print("\n")
+
+	local text = dup("")
+	local arr = dup([])
+	insert(text, "hello")
+	insert(arr, "hey", "bye")
+
+	print("array: [")
+	for i to length(arr) {
+		if not(equals(i, 0)) print(",")
+		print(" ", get(arr, i))
+	}
+	print(" ]\n")
+
+	print("again: [")
+	local b = bool false
+	for i in arr {
+		if b print(",")
+		print(" ", i)
+		b = bool true
+	}
+	print(" ]\n")
+
+	print("text bytes: ")
+	for i from 0 to length(text) {
+		if not(equals(i, 0)) print(", ")
+		print(get(text, i))
+	}
+	print("\n")
+
+	print("again: ")
+	for c in text print(c, " ") print("\n")
 }
 
-glob = 32
+main = function {
+	test()
+	return 0
+}
 
 Button:
 	.background = color 0x60609f
@@ -22,57 +78,6 @@ Button:
 	.font = font default
 
 	.init = function {
-		print("Init\n")
-
-		; TESTS ;
-
-		local i = 0
-		while not(equals(i, 10)) {
-			i = sum(i, 1)
-			print(i, "\n")
-		}
-
-		; TODO: Make it so text is not shared across all
-		components (very annoying) ;
-		local text = "Hello\n"
-		insert(text, "What is up?\n")
-		print(text)
-
-		local t = text
-		insert(t, "Break\n")
-		print(text) ; text is now modified ;
-		print("\n")
-
-		local text = ""
-		local arr = []
-		insert(text, "hello")
-		insert(arr, "hey", "bye")
-
-		print("bool false: [")
-		for i to length(arr) {
-			if not(equals(i, 0)) print(",")
-			print(" ", get(arr, i))
-		}
-		print(" ]\n")
-
-		print("again: [")
-		local b = bool false
-		for i in arr {
-			if b print(",")
-			print(" ", i)
-			b = bool true
-		}
-		print(" ]\n")
-
-		print("text bytes: ")
-		for i from 0 to length(text) {
-			if not(equals(i, 0)) print(", ")
-			print(get(text, i))
-		}
-		print("\n")
-
-		print("again: ")
-		for c in text print(c, " ") print("\n")
 	}
 	.draw = function {
 		local c = color 0

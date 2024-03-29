@@ -1,14 +1,17 @@
 #include "gui.h"
 
+Union environment_union = { .limit = SIZE_MAX };
 Label global_label;
 
 static struct environment {
+	Union *uni;
 	Label *label; /* first label in the linked list */
 	Label *cur; /* selected label */
 	View *view; /* current view */
 	Property *stack;
 	Uint32 numStack;
 } environment = {
+	.uni = &environment_union,
 	.label = &global_label
 };
 
@@ -19,6 +22,19 @@ int function_Execute(Function *func,
 static int EvaluateInstruction(Instruction *instr, Value *value);
 static int ExecuteInstructions(Instruction *instrs,
 		Uint32 num, Value *value);
+
+/*static void environment_GC(void)
+{
+	* free unused pointers *
+	Union *const uni = environment.uni;
+	for (Uint32 i = 0; uni->numPointers; i++) {
+		struct mem_ptr *const ptr = &uni->pointers[i];
+		if ((type_t) ptr->flags == TYPE_NULL) {
+			continue;
+		}
+
+	}
+}*/
 
 static char *WordTerminate(struct value_string *s)
 {
@@ -183,7 +199,7 @@ int function_Execute(Function *func, Instruction *args, Uint32 numArgs,
 	}
 
 	if (numArgs > 0) {
-		newStack = union_Realloc(union_Default(), environment.stack,
+		newStack = union_Realloc(environment.uni, environment.stack,
 				sizeof(*environment.stack) *
 				(environment.numStack + numArgs));
 		if (newStack == NULL) {
@@ -296,7 +312,7 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 		if (EvaluateInstruction(instr->forr.to, &to) < 0) {
 			return -1;
 		}
-		newStack = union_Realloc(union_Default(), environment.stack,
+		newStack = union_Realloc(environment.uni, environment.stack,
 				sizeof(*newStack) *
 				(environment.numStack + 1));
 		if (newStack == NULL) {
@@ -325,7 +341,7 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 		if (EvaluateInstruction(instr->forin.in, &in)) {
 			return -1;
 		}
-		newStack = union_Realloc(union_Default(), environment.stack,
+		newStack = union_Realloc(environment.uni, environment.stack,
 				sizeof(*newStack) *
 				(environment.numStack + 1));
 		if (newStack == NULL) {
@@ -397,7 +413,7 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 		if (EvaluateInstruction(instr->local.value, result) < 0) {
 			return -1;
 		}
-		newStack = union_Realloc(union_Default(), environment.stack,
+		newStack = union_Realloc(environment.uni, environment.stack,
 				sizeof(*environment.stack) * (environment.numStack + 1));
 		if (newStack == NULL) {
 			return -1;
@@ -415,7 +431,7 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 
 	case INSTR_SET:
 		var = SearchVariable(instr->set.variable, &pValue);
-		if (var == NULL || var->value.type == TYPE_FUNCTION) {
+		if (var == NULL) {
 			return -1;
 		}
 		if (EvaluateInstruction(instr->set.value, result) < 0) {
@@ -549,6 +565,54 @@ static int SystemNot(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
+static int SystemDup(Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs != 1) {
+		return -1;
+	}
+	switch (args[0].type) {
+	case TYPE_ARRAY: {
+		struct value_array *arr;
+
+		arr = union_Alloc(environment.uni, sizeof(*arr));
+		if (arr == NULL) {
+			return -1;
+		}
+		arr->numValues = args[0].a->numValues;
+		arr->values = union_Alloc(environment.uni,
+				sizeof(*arr->values) * arr->numValues);
+		if (arr->values == NULL) {
+			return -1;
+		}
+		memcpy(arr->values, args[0].a->values,
+				sizeof(*arr->values) * arr->numValues);
+		result->type = TYPE_ARRAY;
+		result->a = arr;
+		break;
+	}
+	case TYPE_STRING: {
+		struct value_string *str;
+
+		str = union_Alloc(environment.uni, sizeof(*str));
+		if (str == NULL) {
+			return -1;
+		}
+		str->length = args[0].s->length;
+		str->data = union_Alloc(environment.uni, str->length);
+		if (str->data == NULL) {
+			return -1;
+		}
+		memcpy(str->data, args[0].s->data, str->length);
+		result->type = TYPE_STRING;
+		result->s = str;
+		break;
+	}
+	default:
+		*result = args[0];
+	}
+	return 0;
+}
+
 static bool Equals(Value *v1, Value *v2)
 {
 	switch (v1->type) {
@@ -615,6 +679,11 @@ static bool Equals(Value *v1, Value *v2)
 			return false;
 		}
 		break;
+	case TYPE_SUCCESS:
+		if (strcmp(v1->succ.id, v2->succ.id) != 0) {
+			return false;
+		}
+		break;
 	case TYPE_VIEW:
 		if (v1->v != v2->v) {
 			return false;
@@ -640,6 +709,56 @@ static int SystemEquals(Value *args, Uint32 numArgs, Value *result)
 			}
 		}
 	}
+	return 0;
+}
+
+static int SystemExists(Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs != 1 || args[0].type != TYPE_SUCCESS) {
+		return -1;
+	}
+	result->type = TYPE_BOOL;
+	result->b = args[0].succ.success;
+	return 0;
+}
+
+static int SystemFile(Value *args, Uint32 numArgs, Value *result)
+{
+	FILE *fp;
+	long pos;
+
+	if (numArgs != 1 || args[0].type != TYPE_STRING) {
+		return -1;
+	}
+
+	result->type = TYPE_SUCCESS;
+
+	char name[args[0].s->length + 1];
+	memcpy(name, args[0].s->data, args[0].s->length);
+	name[args[0].s->length] = '\0';
+
+	result->succ.id = union_Alloc(environment.uni, sizeof(name));
+	if (result->succ.id == NULL) {
+		return -1;
+	}
+	strcpy(result->succ.id, name);
+
+	fp = fopen(name, "r");
+	if (fp == NULL) {
+		result->succ.success = false;
+		return 0;
+	}
+
+	fseek(fp, 0, SEEK_END);
+	pos = ftell(fp);
+	result->succ.content = union_Alloc(environment.uni, pos);
+	if (result->succ.content == NULL) {
+		return -1;
+	}
+	fseek(fp, 0, SEEK_SET);
+	fread(result->succ.content, 1, pos, fp);
+
+	result->succ.success = true;
 	return 0;
 }
 
@@ -680,7 +799,10 @@ static int SystemInsert(Value *args, Uint32 numArgs, Value *result)
 		Value *newValues;
 
 		arr = args[0].a;
-		newValues = union_Realloc(union_Default(), arr->values,
+		if (!union_HasPointer(environment.uni, arr->values)) {
+			return -1;
+		}
+		newValues = union_Realloc(environment.uni, arr->values,
 				sizeof(*arr->values) *
 				(arr->numValues + numArgs - 1));
 		if (newValues == NULL) {
@@ -694,6 +816,11 @@ static int SystemInsert(Value *args, Uint32 numArgs, Value *result)
 		struct value_string *str;
 		Uint32 count, index;
 		char *newData;
+
+		str = args[0].s;
+		if (!union_HasPointer(environment.uni, str->data)) {
+			return -1;
+		}
 
 		count = 0;
 		for (Uint32 i = 1; i < numArgs; i++) {
@@ -713,8 +840,7 @@ static int SystemInsert(Value *args, Uint32 numArgs, Value *result)
 		}
 
 
-		str = args[0].s;
-		newData = union_Realloc(union_Default(), str->data,
+		newData = union_Realloc(environment.uni, str->data,
 				str->length + count);
 		if (newData == NULL) {
 			return -1;
@@ -760,6 +886,36 @@ static int SystemLength(Value *args, Uint32 numArgs, Value *result)
 	} else {
 		return -1;
 	}
+	return 0;
+}
+
+static int SystemName(Value *args, Uint32 numArgs, Value *result)
+{
+	struct value_string *s;
+	Uint32 len;
+	char *data;
+
+	if (numArgs != 1 || args[0].type != TYPE_SUCCESS) {
+		return -1;
+	}
+
+	s = union_Allocf(environment.uni, sizeof(*s), 1 + TYPE_STRING);
+	if (s == NULL) {
+		return -1;
+	}
+
+	len = strlen(args[0].succ.id);
+	data = union_Alloc(environment.uni, len);
+	if (data == NULL) {
+		return -1;
+	}
+	memcpy(data, args[0].succ.id, len);
+
+	s->data = data;
+	s->length = len;
+
+	result->type = TYPE_STRING;
+	result->s = s;
 	return 0;
 }
 
@@ -811,6 +967,15 @@ static void PrintValue(Value *value, FILE *fp)
 		break;
 	case TYPE_STRING:
 		fprintf(fp, "%.*s", value->s->length, value->s->data);
+		break;
+	case TYPE_SUCCESS:
+		if (value->succ.success) {
+			fprintf(fp, "%s", value->succ.content);
+		} else if (value->succ.id != NULL) {
+			fprintf(fp, "no success on: %s", value->succ.id);
+		} else {
+			fprintf(fp, "(null)");
+		}
 		break;
 	case TYPE_VIEW:
 		fprintf(fp, "%p", value->v);
@@ -1139,10 +1304,14 @@ static int ExecuteSystem(const char *call,
 	} functions[] = {
 		/* TODO: add more system functions */
 		{ "and", SystemAnd },
+		{ "dup", SystemDup },
 		{ "equals", SystemEquals },
+		{ "exists", SystemExists },
+		{ "file", SystemFile },
 		{ "get", SystemGet },
 		{ "insert", SystemInsert },
 		{ "length", SystemLength },
+		{ "name", SystemName },
 		{ "not", SystemNot },
 		{ "or", SystemOr },
 		{ "print", SystemPrint },
@@ -1195,7 +1364,7 @@ static int MergeWithLabel(const RawWrapper *wrapper)
 
 	Label *const label = environment.cur;
 	const Uint32 num = label->numProperties;
-	newProperties = union_Realloc(union_Default(), label->properties,
+	newProperties = union_Realloc(environment.uni, label->properties,
 			sizeof(*label->properties) *
 			(label->numProperties + wrapper->numProperties));
 	if (newProperties == NULL) {
@@ -1247,7 +1416,7 @@ Label *environment_AddLabel(const char *name)
 	Label *label;
 	Label *last;
 
-	label = union_Alloc(union_Default(), sizeof(*label));
+	label = union_Alloc(environment.uni, sizeof(*label));
 	if (label == NULL) {
 		return NULL;
 	}

@@ -133,6 +133,16 @@ void *union_Mask(Union *uni, Uint64 flags, const void *ptr)
 	return NULL;
 }
 
+bool union_HasPointer(Union *uni, void *ptr)
+{
+	for (Uint32 i = 0; i < uni->numPointers; i++) {
+		if (uni->pointers[i].sys == ptr) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void union_FreeAll(Union *uni)
 {
 	for (Uint32 i = 0; i < uni->numPointers; i++) {

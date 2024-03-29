@@ -70,6 +70,7 @@ void *union_Alloc(Union *uni, Size sz);
 void *union_Allocf(Union *uni, Size sz, Uint64 flags);
 void *union_Realloc(Union *uni, void *ptr, Size sz);
 void *union_Mask(Union *uni, Uint64 flags, const void *ptr);
+bool union_HasPointer(Union *uni, void *ptr);
 void union_FreeAll(Union *uni);
 int union_Free(Union *uni, void *ptr);
 void union_Trim(Union *uni, Uint32 numPointers);
@@ -178,6 +179,7 @@ typedef enum type {
 	TYPE_POINT,
 	TYPE_RECT,
 	TYPE_STRING,
+	TYPE_SUCCESS,
 	TYPE_VIEW
 } type_t;
 
@@ -228,6 +230,12 @@ struct value_string {
 	Uint32 length;
 };
 
+struct value_success {
+	char *id;
+	bool success;
+	char *content;
+};
+
 typedef struct value {
 	type_t type;
 	union {
@@ -242,6 +250,7 @@ typedef struct value {
 		Point p;
 		Rect r;
 		struct value_string *s;
+		struct value_success succ;
 		struct view *v;
 	};
 } Value;

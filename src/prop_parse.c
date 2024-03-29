@@ -154,7 +154,8 @@ static type_t CheckType(struct parser *parser)
 		[TYPE_POINT] = "point",
 		[TYPE_RECT] = "rect",
 		[TYPE_STRING] = "string",
-		[TYPE_VIEW] = "view",
+		[TYPE_SUCCESS] = "", /* hidden type */
+		[TYPE_VIEW] = "view"
 	};
 	if (parser->nWord == 0) {
 		return TYPE_NULL;
@@ -1014,6 +1015,7 @@ static int _ReadValue(struct parser *parser, type_t type)
 		[TYPE_POINT] = ReadPoint,
 		[TYPE_RECT] = ReadRect,
 		[TYPE_STRING] = ReadString,
+		[TYPE_SUCCESS] = SkipSpace, /* no specific read function */
 		[TYPE_VIEW] = ReadView
 	};
 	if (type == TYPE_NULL) {

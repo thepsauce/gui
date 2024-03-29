@@ -5,3 +5,6 @@ Text window: Dynamically change properties of objects.
 
 Still, everything should be done in C. All features of the property language are
 not for deploying, just for debugging and testing purposes.
+
+Property language needs to be reworked to eliminate all memory leaks (there are
+everywhere), implement garbage collection (removal of unused pointers)
