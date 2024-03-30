@@ -41,15 +41,19 @@ View *view_Create(const char *labelName, const Rect *rect)
 	view->label = label;
 	view->uni = uni;
 	view->rect = *rect;
-	view->values = union_Alloc(uni, sizeof(*view->values) *
-			label->numProperties);
-	if (view->values == NULL) {
-		union_Free(uni, view);
-		union_Free(union_Default(), uni);
-		return NULL;
-	}
-	for (Uint32 i = 0; i < label->numProperties; i++) {
-		view->values[i] = label->properties[i].value;
+	if (label->numProperties != 0) {
+		view->values = union_Alloc(uni, sizeof(*view->values) *
+				label->numProperties);
+		if (view->values == NULL) {
+			union_Free(uni, view);
+			union_Free(union_Default(), uni);
+			return NULL;
+		}
+		for (Uint32 i = 0; i < label->numProperties; i++) {
+			view->values[i] = label->properties[i].value;
+		}
+	} else {
+		view->values = NULL;
 	}
 	view->region = NULL;
 	view->prev = NULL;

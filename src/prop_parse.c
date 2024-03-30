@@ -148,7 +148,6 @@ static type_t CheckType(struct parser *parser)
 		[TYPE_COLOR] = "color",
 		[TYPE_EVENT] = "event",
 		[TYPE_FLOAT] = "float",
-		[TYPE_FONT] = "font",
 		[TYPE_FUNCTION] = "function",
 		[TYPE_INTEGER] = "int",
 		[TYPE_POINT] = "point",
@@ -628,18 +627,6 @@ static int ReadFunction(struct parser *parser)
 	return 0;
 }
 
-static int ReadFont(struct parser *parser)
-{
-	if (ReadWord(parser) < 0) {
-		return -1;
-	}
-	if (!strcmp(parser->word, "default")) {
-		parser->value.font = NULL;
-		return 0;
-	}
-	return -1;
-}
-
 static int ReadInt(struct parser *parser)
 {
 	struct int_or_float iof;
@@ -1069,7 +1056,6 @@ static int _ReadValue(struct parser *parser, type_t type)
 		[TYPE_COLOR] = ReadColor,
 		[TYPE_EVENT] = ReadEvent,
 		[TYPE_FLOAT] = ReadFloat,
-		[TYPE_FONT] = ReadFont,
 		[TYPE_FUNCTION] = ReadFunction,
 		[TYPE_INTEGER] = ReadInt,
 		[TYPE_POINT] = ReadPoint,

@@ -35,7 +35,7 @@ syn match PropertyStringChar "\v\\([abefnrvt]|x[0-9a-fA-F][0-9a-fA-F])" containe
 hi link PropertyString String
 hi link PropertyStringChar SpecialChar
 
-syn keyword PropertyValueTypes array bool color font function int float string
+syn keyword PropertyValueTypes array bool color function int float string
 syn keyword PropertyValueSpecialTypes event point rect view
 syn keyword PropertyValueKeywords default black white red green blue yellow cyan magenta gray orange purple brown pink olive teal navy false true
 

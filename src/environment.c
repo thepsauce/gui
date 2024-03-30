@@ -651,11 +651,6 @@ static bool Equals(Value *v1, Value *v2)
 			return false;
 		}
 		break;
-	case TYPE_FONT:
-		if (v1->font != v2->font) {
-			return false;
-		}
-		break;
 	case TYPE_FUNCTION:
 		if (v1->func != v2->func) {
 			return false;
@@ -949,9 +944,6 @@ static void PrintValue(Value *value, FILE *fp)
 	case TYPE_FLOAT:
 		fprintf(fp, "%f", value->f);
 		break;
-	case TYPE_FONT:
-		fprintf(fp, "%p", value->font);
-		break;
 	case TYPE_FUNCTION:
 		fprintf(fp, "%p", value->func);
 		break;
@@ -1059,6 +1051,31 @@ static int SystemContains(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
+static int args_GetPoint(Value *args, Uint32 numArgs, Point *p)
+{
+	Value v;
+
+	if (numArgs == 2) {
+		Sint32 nums[2];
+
+		for (Uint32 i = 0; i < numArgs; i++) {
+			if (value_Cast(&args[i], TYPE_INTEGER, &v) < 0) {
+				return -1;
+			}
+			nums[i] = v.i;
+		}
+		*p = (Point) { nums[0], nums[1] };
+	} else if (numArgs == 1) {
+		if (args[0].type != TYPE_POINT) {
+			return -1;
+		}
+		*p = args[0].p;
+	} else {
+		return -1;
+	}
+	return 0;
+}
+
 static int args_GetRect(Value *args, Uint32 numArgs, Rect *r)
 {
 	Value v;
@@ -1116,6 +1133,50 @@ static int SystemCreateView(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
+static int SystemCreateFont(Value *args, Uint32 numArgs, Value *result)
+{
+	char *name;
+	Value size;
+	Uint32 index;
+
+	if (numArgs != 2 || args[0].type != TYPE_STRING) {
+		return -1;
+	}
+	name = WordTerminate(args[0].s);
+	if (name == NULL) {
+		return -1;
+	}
+	if (value_Cast(&args[1], TYPE_INTEGER, &size) < 0) {
+		return -1;
+	}
+	if (renderer_CreateFont(name, size.i, &index) == NULL) {
+		return -1;
+	}
+	result->type = TYPE_INTEGER;
+	result->i = index;
+	return 0;
+}
+
+static int SystemDrawText(Value *args, Uint32 numArgs, Value *result)
+{
+	Point p;
+
+	if (numArgs < 3 || args[0].type != TYPE_STRING) {
+		return -1;
+	}
+	if (args_GetPoint(&args[1], numArgs - 1, &p) < 0) {
+		return -1;
+	}
+	char text[args[0].s->length + 1];
+	memcpy(text, args[0].s->data, args[0].s->length);
+	text[args[0].s->length] = '\0';
+	if (renderer_DrawText(renderer_Default(), text, p.x, p.y) < 0) {
+		return -1;
+	}
+	(void) result;
+	return 0;
+}
+
 static int SystemGetParent(Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 1 || args[0].type != TYPE_VIEW) {
@@ -1139,6 +1200,23 @@ static int SystemSetDrawColor(Value *args, Uint32 numArgs, Value *result)
 	}
 
 	renderer_SetDrawColor(renderer_Default(), value.c);
+	(void) result;
+	return 0;
+}
+
+static int SystemSetFont(Value *args, Uint32 numArgs, Value *result)
+{
+	Value index;
+
+	if (numArgs != 1) {
+		return -1;
+	}
+	if (value_Cast(&args[0], TYPE_INTEGER, &index) < 0) {
+		return -1;
+	}
+	if (renderer_SelectFont(index.i) < 0) {
+		return -1;
+	}
 	(void) result;
 	return 0;
 }
@@ -1262,7 +1340,7 @@ static int SystemGetWindowHeight(Value *args, Uint32 numArgs, Value *result)
 
 static int SystemGetType(Value *args, Uint32 numArgs, Value *result)
 {
-	if (numArgs == 0 || args[0].type != TYPE_EVENT) {
+	if (numArgs != 1 || args[0].type != TYPE_EVENT) {
 		return -1;
 	}
 	result->type = TYPE_INTEGER;
@@ -1274,7 +1352,7 @@ static int SystemGetPos(Value *args, Uint32 numArgs, Value *result)
 {
 	EventInfo *info;
 
-	if (numArgs == 0 || args[0].type != TYPE_EVENT) {
+	if (numArgs != 1 || args[0].type != TYPE_EVENT) {
 		return -1;
 	}
 	info = &args[0].e.info;
@@ -1286,12 +1364,34 @@ static int SystemGetPos(Value *args, Uint32 numArgs, Value *result)
 
 static int SystemGetButton(Value *args, Uint32 numArgs, Value *result)
 {
-
-	if (numArgs == 0 || args[0].type != TYPE_EVENT) {
+	if (numArgs != 1 || args[0].type != TYPE_EVENT) {
 		return -1;
 	}
 	result->type = TYPE_INTEGER;
 	result->i = args[0].e.info.mi.button;
+	return 0;
+}
+
+static int SystemGetFontSize(Value *args, Uint32 numArgs, Value *result)
+{
+	Font *font;
+
+	if (numArgs != 1 || args[0].type != TYPE_INTEGER) {
+		return -1;
+	}
+	font = renderer_GetFont(args[0].i);
+	result->type = TYPE_INTEGER;
+	result->i = TTF_FontHeight(font);
+	return 0;
+}
+
+static int SystemGetWheel(Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs != 1 || args[0].type != TYPE_EVENT) {
+		return -1;
+	}
+	result->type = TYPE_INTEGER;
+	result->i = args[0].e.info.mwi.y;
 	return 0;
 }
 
@@ -1319,17 +1419,22 @@ static int ExecuteSystem(const char *call,
 		{ "sum", SystemSum },
 
 		{ "Contains", SystemContains },
+		{ "CreateFont", SystemCreateFont },
 		{ "CreateView", SystemCreateView },
+		{ "DrawText", SystemDrawText },
 		{ "FillRect", SystemFillRect },
 		{ "GetButton", SystemGetButton },
+		{ "GetFontSize", SystemGetFontSize },
 		{ "GetParent", SystemGetParent },
 		{ "GetPos", SystemGetPos },
 		{ "GetProperty", SystemGetProperty },
 		{ "GetRect", SystemGetRect },
 		{ "GetType", SystemGetType },
+		{ "GetWheel", SystemGetWheel },
 		{ "GetWindowHeight", SystemGetWindowHeight },
 		{ "GetWindowWidth", SystemGetWindowWidth },
 		{ "SetDrawColor", SystemSetDrawColor },
+		{ "SetFont", SystemSetFont },
 		{ "SetParent", SystemSetParent },
 		{ "SetProperty", SystemSetProperty },
 		{ "SetRect", SystemSetRect },

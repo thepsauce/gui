@@ -242,5 +242,240 @@ int renderer_FillEllipse(SDL_Renderer *renderer, Sint32 x, Sint32 y, Sint32 rx, 
 		} while (i > h);
 	}
 
-	return (result);
+	return result;
 }
+
+struct font *fonts;
+
+Uint32 num_fonts;
+Uint32 cur_font;
+
+static Uint32 AddFont(Font *font)
+{
+	Uint32 iFont;
+	const char *name, *otherName;
+	int height, otherHeight;
+	Font *other;
+	struct font *newFonts;
+
+	name = TTF_FontFaceFamilyName(font);
+	height = TTF_FontHeight(font);
+	for (iFont = 0; iFont < num_fonts; iFont++) {
+		other = fonts[iFont].font;
+		otherHeight = TTF_FontHeight(other);
+		otherName = TTF_FontFaceFamilyName(other);
+		if (height == otherHeight && strcmp(name, otherName) == 0) {
+			break;
+		}
+	}
+
+	if (iFont == num_fonts) {
+		newFonts = union_Realloc(union_Default(), fonts,
+				sizeof(*newFonts) * (num_fonts + 1));
+		if (newFonts == NULL) {
+			return UINT32_MAX;
+		}
+		fonts = newFonts;
+		fonts[num_fonts].font = font;
+		fonts[num_fonts].cachedWords = NULL;
+		fonts[num_fonts].numCachedWords = 0;
+		num_fonts++;
+	}
+	return iFont;
+}
+
+int renderer_SetFont(Font *font)
+{
+	Uint32 iFont;
+
+	iFont = AddFont(font);
+	if (iFont == UINT32_MAX) {
+		return -1;
+	}
+	cur_font = iFont;
+	return 0;
+}
+
+int renderer_SelectFont(Uint32 index)
+{
+	if (index >= num_fonts) {
+		return -1;
+	}
+	cur_font = index;
+	return 0;
+}
+
+Font *renderer_CreateFont(const char *name, int size, Uint32 *pIndex)
+{
+	Font *font;
+	Uint32 index;
+
+	font = TTF_OpenFont(name, size);
+	if (font == NULL) {
+		return NULL;
+	}
+	index = AddFont(font);
+	if (index == UINT32_MAX) {
+		TTF_CloseFont(font);
+		return NULL;
+	}
+	if (pIndex != NULL) {
+		*pIndex = index;
+	}
+	return font;
+}
+
+Font *renderer_GetFont(Uint32 index)
+{
+	if (index >= num_fonts) {
+		return NULL;
+	}
+	return fonts[index].font;
+}
+
+static struct word *GetCachedWord(const char *data)
+{
+	struct font font;
+
+	font = fonts[cur_font];
+	for (Uint32 i = 0; i < font.numCachedWords; i++) {
+		struct word *const word = &font.cachedWords[i];
+		if (strcmp(word->data, data) == 0) {
+			return word;
+		}
+	}
+	return NULL;
+}
+
+static struct word *CacheWord(Renderer *renderer, const char *data)
+{
+	const Color white = { 255, 255, 255, 255 };
+
+	struct font *font;
+
+	struct word *newWords;
+
+	SDL_Surface *textSurface;
+
+	struct word word;
+
+	Size len;
+
+	font = &fonts[cur_font];
+
+	newWords = union_Realloc(union_Default(), font->cachedWords,
+			sizeof(*newWords) * (font->numCachedWords + 1));
+	if (newWords == NULL) {
+		return NULL;
+	}
+	font->cachedWords = newWords;
+
+	textSurface = TTF_RenderText_Solid(font->font, data, white);
+	if (textSurface == NULL) {
+		return NULL;
+	}
+
+	word.texture = SDL_CreateTextureFromSurface(renderer, textSurface);
+	if (word.texture == NULL) {
+		SDL_FreeSurface(textSurface);
+		return NULL;
+	}
+
+	word.width = textSurface->w;
+	word.height = textSurface->h;
+
+	SDL_FreeSurface(textSurface);
+
+	len = strlen(data);
+	word.data = union_Alloc(union_Default(), len + 1);
+	memcpy(word.data, data, len);
+	word.data[len] = '\0';
+
+	font->cachedWords[font->numCachedWords] = word;
+	return &font->cachedWords[font->numCachedWords++];
+}
+
+int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y)
+{
+	struct font *font;
+	Uint8 r, g, b, a;
+	int advance;
+	int height;
+	Sint32 cx, cy;
+	const char *end;
+	char *data = NULL, *newData;
+	struct word *word;
+	Rect textRect;
+
+	font = &fonts[cur_font];
+
+	SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a);
+
+	TTF_GlyphMetrics32(font->font, ' ', NULL, NULL, NULL, NULL, &advance);
+	height = TTF_FontHeight(font->font);
+
+	cx = x;
+	cy = y;
+	while (*text != '\0') {
+		while (*text <= ' ') {
+			bool b = false;
+
+			switch (*text) {
+			case ' ':
+				cx += advance;
+				break;
+			case '\t':
+				cx += 4 * advance - (x - cx) % (4 * advance);
+				break;
+			case '\n':
+				cx = x;
+				cy += height;
+				break;
+			default:
+				b = true;
+			}
+			if (b) {
+				break;
+			}
+			text++;
+		}
+
+		if (*text == '\0') {
+			break;
+		}
+
+		end = text;
+		while (*end > ' ') {
+			end++;
+		}
+
+		newData = union_Realloc(union_Default(), data, end - text + 1);
+		if (newData == NULL) {
+			union_Free(union_Default(), data);
+			return -1;
+		}
+		data = newData;
+
+		memcpy(data, text, end - text);
+		data[end - text] = '\0';
+		word = GetCachedWord(data);
+
+		if (word == NULL) {
+			word = CacheWord(renderer, data);
+			if (word == NULL) {
+				union_Free(union_Default(), data);
+				return -1;
+			}
+		}
+
+		textRect = (Rect) {
+			cx, cy, word->width, word->height
+		};
+		SDL_RenderCopy(renderer, word->texture, NULL, &textRect);
+		cx += word->width;
+		text = end;
+	}
+	union_Free(union_Default(), data);
+	return 0;
+}
+

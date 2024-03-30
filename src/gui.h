@@ -28,6 +28,9 @@ typedef size_t Size;
 
 #define PRINT_DEBUG() fprintf(stderr, "error at %s:%d: ", __FILE__, __LINE__)
 
+typedef SDL_Color Color;
+typedef SDL_Texture Texture;
+typedef TTF_Font Font;
 typedef SDL_Renderer Renderer;
 typedef SDL_Rect Rect;
 typedef SDL_Point Point;
@@ -47,6 +50,22 @@ int renderer_DrawLine(Renderer *renderer, Sint32 x1, Sint32 y1,
 		Sint32 x2, Sint32 y2);
 int renderer_DrawEllipse(Renderer *renderer, Sint32 x, Sint32 y, Sint32 rx, Sint32 ry);
 int renderer_FillEllipse(Renderer *renderer, Sint32 x, Sint32 y, Sint32 rx, Sint32 ry);
+
+struct font {
+	Font *font;
+	struct word {
+		char *data;
+		Sint32 width, height;
+		SDL_Texture *texture;
+	} *cachedWords;
+	Uint32 numCachedWords;
+};
+
+Font *renderer_CreateFont(const char *name, int size, Uint32 *pIndex);
+Font *renderer_GetFont(Uint32 index);
+int renderer_SelectFont(Uint32 index);
+int renderer_SetFont(Font *font);
+int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y);
 
 bool rect_IsEmpty(const Rect *rect);
 bool rect_Intersect(const Rect *r1, const Rect *r2, Rect *rect);
@@ -173,7 +192,6 @@ typedef enum type {
 	TYPE_COLOR,
 	TYPE_EVENT,
 	TYPE_FLOAT,
-	TYPE_FONT,
 	TYPE_FUNCTION,
 	TYPE_INTEGER,
 	TYPE_POINT,
@@ -244,7 +262,6 @@ typedef struct value {
 		Uint32 c;
 		struct value_event e;
 		float f;
-		void *font;
 		Function *func;
 		Sint64 i;
 		Point p;

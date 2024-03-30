@@ -38,6 +38,11 @@ int gui_Init(Uint32 flags)
 		return 1;
 	}
 
+	if (TTF_Init() < 0) {
+		printf("SDL_ttf could not be initialized: %s\n", TTF_GetError());
+		return 1;
+	}
+
 	gui_keys = SDL_GetKeyboardState(NULL);
 
 	gui_window = SDL_CreateWindow(
