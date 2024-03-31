@@ -45,6 +45,7 @@ int gui_Run(void);
 Renderer *renderer_Default(void);
 int renderer_SetDrawColor(Renderer *renderer, Uint32 color);
 int renderer_SetDrawColorRGB(Renderer *renderer, Uint8 r, Uint8 g, Uint8 b);
+int renderer_DrawRect(Renderer *renderer, Rect *rect);
 int renderer_FillRect(Renderer *renderer, Rect *rect);
 int renderer_DrawLine(Renderer *renderer, Sint32 x1, Sint32 y1,
 		Sint32 x2, Sint32 y2);
@@ -205,12 +206,15 @@ typedef enum {
 	INSTR_BREAK,
 	INSTR_FOR,
 	INSTR_FORIN,
+	INSTR_GETSUB,
 	INSTR_GROUP,
 	INSTR_IF,
 	INSTR_INVOKE,
+	INSTR_INVOKESUB,
 	INSTR_LOCAL,
 	INSTR_RETURN,
 	INSTR_SET,
+	INSTR_SETSUB,
 	INSTR_THIS,
 	INSTR_TRIGGER,
 	INSTR_VALUE,
@@ -293,6 +297,11 @@ struct instr_forin {
 	struct instruction *iter;
 };
 
+struct instr_getsub {
+	char variable[MAX_WORD];
+	char sub[MAX_WORD];
+};
+
 struct instr_group {
 	struct instruction *instructions;
 	Uint32 numInstructions;
@@ -310,6 +319,13 @@ struct instr_invoke {
 	Uint32 numArgs;
 };
 
+struct instr_invokesub {
+	char variable[MAX_WORD];
+	char sub[MAX_WORD];
+	struct instruction *args;
+	Uint32 numArgs;
+};
+
 struct instr_local {
 	char name[MAX_WORD];
 	struct instruction *value;
@@ -321,6 +337,12 @@ struct instr_return {
 
 struct instr_set {
 	char variable[MAX_WORD];
+	struct instruction *value;
+};
+
+struct instr_setsub {
+	char variable[MAX_WORD];
+	char sub[MAX_WORD];
 	struct instruction *value;
 };
 
@@ -347,12 +369,15 @@ typedef struct instruction {
 		struct instr_break breakk;
 		struct instr_for forr;
 		struct instr_forin forin;
+		struct instr_getsub getsub;
 		struct instr_group group;
 		struct instr_if iff;
 		struct instr_invoke invoke;
+		struct instr_invokesub invokesub;
 		struct instr_local local;
 		struct instr_return ret;
 		struct instr_set set;
+		struct instr_setsub setsub;
 		struct instr_trigger trigger;
 		struct instr_value value;
 		struct instr_variable variable;

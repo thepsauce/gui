@@ -449,22 +449,22 @@ static int ReadColor(struct parser *parser)
 		const char *name;
 		Uint32 color;
 	} colors[] = {
-		{ "black", 0x000000 },
-		{ "white", 0xffffff },
-		{ "red", 0xff0000 },
-		{ "green", 0x00ff00 },
-		{ "blue", 0x0000ff },
-		{ "yellow", 0xffff00 },
-		{ "cyan", 0x00ffff },
-		{ "magenta", 0xff00ff },
-		{ "gray", 0x808080 },
-		{ "orange", 0xffa500 },
-		{ "purple", 0x800080 },
-		{ "brown", 0xa52a2a },
-		{ "pink", 0xffc0cb },
-		{ "olive", 0x808000 },
-		{ "teal", 0x008080 },
-		{ "navy", 0x000080 }
+		{ "black", 0xff000000 },
+		{ "white", 0xffffffff },
+		{ "red", 0xffff0000 },
+		{ "green", 0xff00ff00 },
+		{ "blue", 0xff0000ff },
+		{ "yellow", 0xffffff00 },
+		{ "cyan", 0xff00ffff },
+		{ "magenta", 0xffff00ff },
+		{ "gray", 0xff808080 },
+		{ "orange", 0xffffa500 },
+		{ "purple", 0xff800080 },
+		{ "brown", 0xffa52a2a },
+		{ "pink", 0xffffc0cb },
+		{ "olive", 0xff808000 },
+		{ "teal", 0xff008080 },
+		{ "navy", 0xff000080 }
 	};
 
 	if (isalpha(parser->c)) {
@@ -1195,9 +1195,10 @@ static int ReadInstruction(struct parser *parser)
 		parser->instruction.value.value = parser->value;
 		return 0;
 	}
-	SkipSpace(parser);
+
 	const type_t type = CheckType(parser);
 	if (type != TYPE_NULL) {
+		SkipSpace(parser);
 		if (_ReadValue(parser, type) < 0) {
 			return -1;
 		}
@@ -1207,7 +1208,9 @@ static int ReadInstruction(struct parser *parser)
 		parser->instruction.value.value = parser->value;
 		return 0;
 	}
+
 	if (strcmp(parser->word, "const") == 0) {
+		SkipSpace(parser);
 		if (ReadWord(parser) < 0) {
 			return -1;
 		}
@@ -1218,16 +1221,77 @@ static int ReadInstruction(struct parser *parser)
 		parser->instruction.value.value = parser->value;
 		return 0;
 	}
+
+	if (parser->c == '.') {
+		char var[MAX_WORD];
+		char sub[MAX_WORD];
+
+		strcpy(var, parser->word);
+		NextChar(parser); /* skip '.' */
+		SkipSpace(parser);
+		if (ReadWord(parser) < 0) {
+			return -1;
+		}
+		strcpy(sub, parser->word);
+		SkipSpace(parser);
+		if (parser->c == '=') {
+			Instruction *pInstr;
+
+			NextChar(parser); /* skip '=' */
+			SkipSpace(parser);
+			if (ReadInstruction(parser) < 0) {
+				return -1;
+			}
+			pInstr = union_Alloc(union_Default(), sizeof(*pInstr));
+			if (pInstr == NULL) {
+				return -1;
+			}
+			*pInstr = parser->instruction;
+
+			parser->instruction.instr = INSTR_SETSUB;
+			strcpy(parser->instruction.setsub.variable, var);
+			strcpy(parser->instruction.setsub.sub, sub);
+			parser->instruction.setsub.value = pInstr;
+		} else if (parser->c == '(') {
+			Instruction *args;
+			Uint32 numArgs;
+
+			NextChar(parser); /* skip '(' */
+			SkipSpace(parser);
+			if (ReadInvoke(parser) < 0) {
+				return -1;
+			}
+			args = parser->instruction.invoke.args;
+			numArgs = parser->instruction.invoke.numArgs;
+
+			parser->instruction.instr = INSTR_INVOKESUB;
+			strcpy(parser->instruction.invokesub.variable, var);
+			strcpy(parser->instruction.invokesub.sub, sub);
+			parser->instruction.invokesub.args = args;
+			parser->instruction.invokesub.numArgs = numArgs;
+		} else {
+			parser->instruction.instr = INSTR_GETSUB;
+			strcpy(parser->instruction.getsub.variable, var);
+			strcpy(parser->instruction.getsub.sub, sub);
+		}
+		return 0;
+	}
+
+	/* only now do we skip space because the '.' operator is
+	 * not supposed to have any space between it and the previous word */
+	SkipSpace(parser);
 	for (size_t i = 0; i < ARRLEN(keywords); i++) {
 		if (strcmp(keywords[i].word, parser->word) == 0) {
 			return keywords[i].read(parser);
 		}
 	}
+
 	if (parser->c == '(') {
 		NextChar(parser); /* skip '(' */
 		SkipSpace(parser);
 		return ReadInvoke(parser);
 	}
+
 	if (parser->c == '=') {
 		Instruction *pInstr;
 		char var[MAX_WORD];
@@ -1331,7 +1395,7 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 
 	while (SkipSpace(&parser), parser.c != EOF) {
 		if (parser.c == '.') {
-			if (numWrappers == 0) {
+			if (numWrappers == 1) {
 				goto fail;
 			}
 			if (ReadProperty(&parser) < 0) {
@@ -1409,13 +1473,25 @@ fail:
 			p++;
 		}
 	}
-	for (i = 0; i < n; i++) {
-		fputc(parser.buffer[p], stderr);
-		if (p == sizeof(parser.buffer) - 1) {
-			p = 0;
-		} else {
-			p++;
+	if (n > 0) {
+		for (i = 0; i < n - 1; i++) {
+			fputc(parser.buffer[p], stderr);
+			if (p == sizeof(parser.buffer) - 1) {
+				p = 0;
+			} else {
+				p++;
+			}
 		}
+		fprintf(stderr, "\033[31m");
+		fputc(parser.buffer[p], stderr);
+		fprintf(stderr, "\033[0m");
+	}
+	for (i = 0; i < 20; i++) {
+		const int c = NextChar(&parser);
+		if (c == EOF || c == '\n') {
+			break;
+		}
+		fputc(c, stderr);
 	}
 	fputc('\n', stderr);
 	return -1;

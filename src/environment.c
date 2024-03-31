@@ -145,6 +145,226 @@ static Property *SearchVariable(const char *name, Value **pValue)
 	return NULL;
 }
 
+static int GetSubVariable(const char *name, const char *sub, Value *value)
+{
+	Value *pValue;
+
+	if (strcmp(name, "this") == 0) {
+		if (_SearchVariable(environment.view, sub, &pValue) == NULL) {
+			return -1;
+		}
+		*value = *pValue;
+		return 0;
+	}
+	if (SearchVariable(name, &pValue) == NULL) {
+		return -1;
+	}
+	switch (pValue->type) {
+	case TYPE_NULL:
+	case TYPE_ARRAY:
+	case TYPE_BOOL:
+	case TYPE_FLOAT:
+	case TYPE_FUNCTION:
+	case TYPE_INTEGER:
+	case TYPE_STRING:
+	case TYPE_SUCCESS:
+		return -1;
+
+	case TYPE_COLOR:
+		value->type = TYPE_INTEGER;
+		if (sub[0] == '\0' || sub[1] != '\0') {
+			return -1;
+		}
+		switch (sub[0]) {
+		case 'a':
+			value->i = (pValue->i >> 24) & 0xff;
+			break;
+		case 'r':
+			value->i = (pValue->i >> 16) & 0xff;
+			break;
+		case 'g':
+			value->i = (pValue->i >> 8) & 0xff;
+			break;
+		case 'b':
+			value->i = pValue->i & 0xff;
+			break;
+		default:
+			return -1;
+		}
+		break;
+
+	case TYPE_EVENT:
+		/* TODO: maybe? */
+		return -1;
+
+	case TYPE_POINT:
+		value->type = TYPE_INTEGER;
+		if (sub[0] == '\0' || sub[1] != '\0') {
+			return -1;
+		}
+		switch (sub[0]) {
+		case 'x':
+			value->i = pValue->r.x;
+			break;
+		case 'y':
+			value->i = pValue->r.y;
+			break;
+		default:
+			return -1;
+		}
+		break;
+
+	case TYPE_RECT:
+		value->type = TYPE_INTEGER;
+		if (sub[0] == '\0' || sub[1] != '\0') {
+			return -1;
+		}
+		switch (sub[0]) {
+		case 'x':
+			value->i = pValue->r.x;
+			break;
+		case 'y':
+			value->i = pValue->r.y;
+			break;
+		case 'w':
+			value->i = pValue->r.w;
+			break;
+		case 'h':
+			value->i = pValue->r.h;
+			break;
+		default:
+			return -1;
+		}
+		break;
+
+	case TYPE_VIEW:
+		if (_SearchVariable(pValue->v, sub, &pValue) == NULL) {
+			return -1;
+		}
+		*value = *pValue;
+		break;
+	}
+	return 0;
+}
+
+static int SetSubVariable(const char *name, const char *sub, Value *value)
+{
+	Value *pValue;
+	Value actual;
+
+	if (strcmp(name, "this") == 0) {
+		if (_SearchVariable(environment.view, sub, &pValue) == NULL) {
+			return -1;
+		}
+		if (value_Cast(value, pValue->type, &actual) < 0) {
+			return -1;
+		}
+		*pValue = actual;
+		return 0;
+	}
+	if (SearchVariable(name, &pValue) == NULL) {
+		return -1;
+	}
+	switch (pValue->type) {
+	case TYPE_NULL:
+	case TYPE_ARRAY:
+	case TYPE_BOOL:
+	case TYPE_FLOAT:
+	case TYPE_FUNCTION:
+	case TYPE_INTEGER:
+	case TYPE_STRING:
+	case TYPE_SUCCESS:
+		return -1;
+	case TYPE_EVENT:
+		/* TODO: maybe? */
+		return -1;
+
+	case TYPE_COLOR:
+		value->type = TYPE_INTEGER;
+		if (sub[0] == '\0' || sub[1] != '\0') {
+			return -1;
+		}
+		switch (sub[0]) {
+		case 'a':
+			pValue->i &= ~0xff000000;
+			pValue->i |= (value->i & 0xff) << 24;
+			break;
+		case 'r':
+			pValue->i &= ~0xff0000;
+			pValue->i |= (value->i & 0xff) << 16;
+			break;
+		case 'g':
+			pValue->i &= ~0xff00;
+			pValue->i |= (value->i & 0xff) << 8;
+			break;
+		case 'b':
+			pValue->i &= ~0xff;
+			pValue->i |= value->i & 0xff;
+			break;
+		default:
+			return -1;
+		}
+		break;
+
+	case TYPE_POINT:
+		if (value_Cast(value, TYPE_INTEGER, &actual) < 0) {
+			return -1;
+		}
+		value->type = TYPE_INTEGER;
+		if (sub[0] == '\0' || sub[1] != '\0') {
+			return -1;
+		}
+		switch (sub[0]) {
+		case 'x':
+			pValue->r.x = actual.i;
+			break;
+		case 'y':
+			pValue->r.y = actual.i;
+			break;
+		default:
+			return -1;
+		}
+		break;
+
+	case TYPE_RECT:
+		if (value_Cast(value, TYPE_INTEGER, &actual) < 0) {
+			return -1;
+		}
+		value->type = TYPE_INTEGER;
+		if (sub[0] == '\0' || sub[1] != '\0') {
+			return -1;
+		}
+		switch (sub[0]) {
+		case 'x':
+			pValue->r.x = actual.i;
+			break;
+		case 'y':
+			pValue->r.y = actual.i;
+			break;
+		case 'w':
+			pValue->r.w = actual.i;
+			break;
+		case 'h':
+			pValue->r.h = actual.i;
+			break;
+		default:
+			return -1;
+		}
+		break;
+
+	case TYPE_VIEW:
+		if (_SearchVariable(pValue->v, sub, &pValue) == NULL) {
+			return -1;
+		}
+		if (value_Cast(value, pValue->type, &actual) < 0) {
+			return -1;
+		}
+		*pValue = actual;
+		break;
+	}
+	return 0;
+}
+
 static int StandardProc(View *view, event_t event, EventInfo *info)
 {
 	View *prev;
@@ -251,9 +471,16 @@ static int EvaluateInstruction(Instruction *instr, Value *result)
 	case INSTR_LOCAL:
 	case INSTR_RETURN:
 	case INSTR_SET:
+	case INSTR_SETSUB:
 	case INSTR_TRIGGER:
 	case INSTR_WHILE:
 		return -1;
+	case INSTR_GETSUB:
+		if (GetSubVariable(instr->getsub.variable, instr->getsub.sub,
+					result) < 0) {
+			return -1;
+		}
+		break;
 	case INSTR_INVOKE:
 		var = SearchVariable(instr->invoke.name, NULL);
 		if (var == NULL || var->value.type != TYPE_FUNCTION) {
@@ -265,6 +492,19 @@ static int EvaluateInstruction(Instruction *instr, Value *result)
 		} else if (function_Execute(var->value.func,
 					instr->invoke.args,
 					instr->invoke.numArgs, result) < 0) {
+			return -1;
+		}
+		break;
+	case INSTR_INVOKESUB:
+		if (GetSubVariable(instr->invokesub.variable,
+					instr->invokesub.sub, result) < 0) {
+			return -1;
+		}
+		if (result->type != TYPE_FUNCTION) {
+			return -1;
+		}
+		if (function_Execute(result->func, instr->invokesub.args,
+					instr->invokesub.numArgs, result) < 0) {
 			return -1;
 		}
 		break;
@@ -297,6 +537,7 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 	Uint32 index;
 
 	switch (instr->instr) {
+	case INSTR_GETSUB:
 	case INSTR_VALUE:
 	case INSTR_VARIABLE:
 	case INSTR_THIS:
@@ -409,6 +650,20 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 		}
 		break;
 
+	case INSTR_INVOKESUB:
+		if (GetSubVariable(instr->invokesub.variable,
+					instr->invokesub.sub, result) < 0) {
+			return -1;
+		}
+		if (result->type != TYPE_FUNCTION) {
+			return -1;
+		}
+		if (function_Execute(result->func, instr->invokesub.args,
+					instr->invokesub.numArgs, result) < 0) {
+			return -1;
+		}
+		break;
+
 	case INSTR_LOCAL:
 		if (EvaluateInstruction(instr->local.value, result) < 0) {
 			return -1;
@@ -444,6 +699,16 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 			*pValue = out;
 		} else {
 			var->value = out;
+		}
+		break;
+
+	case INSTR_SETSUB:
+		if (EvaluateInstruction(instr->setsub.value, result) < 0) {
+			return -1;
+		}
+		if (SetSubVariable(instr->setsub.variable, instr->setsub.sub,
+					result) < 0) {
+			return -1;
 		}
 		break;
 
@@ -502,6 +767,32 @@ static int ExecuteInstructions(Instruction *instrs,
 		const int r = ExecuteInstruction(&instrs[i], result);
 		if (r != 0) {
 			return r;
+		}
+	}
+	return 0;
+}
+
+static int SystemDiv(Value *args, Uint32 numArgs, Value *result)
+{
+	Value val;
+
+	result->type = TYPE_INTEGER;
+	result->f = 0;
+	result->i = 0;
+	for (Uint32 i = 0; i < numArgs; i++) {
+		if (args[i].type == TYPE_FLOAT) {
+			result->type = TYPE_FLOAT;
+			break;
+		}
+	}
+	for (Uint32 i = 0; i < numArgs; i++) {
+		if (value_Cast(&args[i], result->type, &val) < 0) {
+			return -1;
+		}
+		if (result->type == TYPE_INTEGER) {
+			result->i /= val.i;
+		} else {
+			result->f /= val.f;
 		}
 	}
 	return 0;
@@ -884,6 +1175,60 @@ static int SystemLength(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
+static int SystemMod(Value *args, Uint32 numArgs, Value *result)
+{
+	Value v1, v2;
+
+	if (numArgs != 2) {
+		return -1;
+	}
+	if (args[0].type == TYPE_FLOAT || args[1].type == TYPE_FLOAT) {
+		result->type = TYPE_FLOAT;
+	} else {
+		result->type = TYPE_INTEGER;
+	}
+
+	if (value_Cast(&args[0], result->type, &v1) < 0) {
+		return -1;
+	}
+	if (value_Cast(&args[1], result->type, &v2) < 0) {
+		return -1;
+	}
+
+	if (result->type == TYPE_FLOAT) {
+		result->f = fmod(v1.f, v2.f);
+	} else {
+		result->i = v1.i % v2.i;
+	}
+	return 0;
+}
+
+static int SystemMul(Value *args, Uint32 numArgs, Value *result)
+{
+	Value val;
+
+	result->type = TYPE_INTEGER;
+	result->f = 0;
+	result->i = 0;
+	for (Uint32 i = 0; i < numArgs; i++) {
+		if (args[i].type == TYPE_FLOAT) {
+			result->type = TYPE_FLOAT;
+			break;
+		}
+	}
+	for (Uint32 i = 0; i < numArgs; i++) {
+		if (value_Cast(&args[i], result->type, &val) < 0) {
+			return -1;
+		}
+		if (result->type == TYPE_INTEGER) {
+			result->i *= val.i;
+		} else {
+			result->f *= val.f;
+		}
+	}
+	return 0;
+}
+
 static int SystemName(Value *args, Uint32 numArgs, Value *result)
 {
 	struct value_string *s;
@@ -1133,6 +1478,30 @@ static int SystemCreateView(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
+static int SystemDrawEllipse(Value *args, Uint32 numArgs, Value *result)
+{
+	Rect r;
+
+	if (args_GetRect(&args[0], numArgs, &r) < 0) {
+		return -1;
+	}
+	renderer_DrawEllipse(renderer_Default(), r.x, r.y, r.w, r.h);
+	(void) result;
+	return 0;
+}
+
+static int SystemDrawRect(Value *args, Uint32 numArgs, Value *result)
+{
+	Rect r;
+
+	if (args_GetRect(&args[0], numArgs, &r) < 0) {
+		return -1;
+	}
+	renderer_DrawRect(renderer_Default(), &r);
+	(void) result;
+	return 0;
+}
+
 static int SystemCreateFont(Value *args, Uint32 numArgs, Value *result)
 {
 	char *name;
@@ -1281,6 +1650,18 @@ static int SystemSetProperty(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
+static int SystemFillEllipse(Value *args, Uint32 numArgs, Value *result)
+{
+	Rect r;
+
+	if (args_GetRect(args, numArgs, &r) < 0) {
+		return -1;
+	}
+	renderer_FillEllipse(renderer_Default(), r.x, r.y, r.w, r.h);
+	(void) result;
+	return 0;
+}
+
 static int SystemFillRect(Value *args, Uint32 numArgs, Value *result)
 {
 	Rect r;
@@ -1404,6 +1785,7 @@ static int ExecuteSystem(const char *call,
 	} functions[] = {
 		/* TODO: add more system functions */
 		{ "and", SystemAnd },
+		{ "div", SystemDiv },
 		{ "dup", SystemDup },
 		{ "equals", SystemEquals },
 		{ "exists", SystemExists },
@@ -1411,6 +1793,8 @@ static int ExecuteSystem(const char *call,
 		{ "get", SystemGet },
 		{ "insert", SystemInsert },
 		{ "length", SystemLength },
+		{ "mod", SystemMod },
+		{ "mul", SystemMul },
 		{ "name", SystemName },
 		{ "not", SystemNot },
 		{ "or", SystemOr },
@@ -1421,7 +1805,10 @@ static int ExecuteSystem(const char *call,
 		{ "Contains", SystemContains },
 		{ "CreateFont", SystemCreateFont },
 		{ "CreateView", SystemCreateView },
+		{ "DrawRect", SystemDrawRect },
+		{ "DrawEllipse", SystemDrawEllipse },
 		{ "DrawText", SystemDrawText },
+		{ "FillEllipse", SystemFillEllipse },
 		{ "FillRect", SystemFillRect },
 		{ "GetButton", SystemGetButton },
 		{ "GetFontSize", SystemGetFontSize },

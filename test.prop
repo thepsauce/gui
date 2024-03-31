@@ -23,14 +23,22 @@ main = function {
 Button:
 	.font = int 0
 	.fontSize = int 16
+	.mouse = point ()
 	.init = function {
 		font = CreateFont("FiraCode-Regular.ttf", fontSize)
 	}
 	.draw = function {
 		SetFont(font)
+		SetDrawColor(color white)
 		DrawText("Hello there\nWhat is this?", 30, 30)
+
+		DrawEllipse(80, 80, 30, 30)
+		FillEllipse(mouse.x, mouse.y, 30, 30)
 	}
 	.event = function event e {
+		if equals(GetType(e), const EVENT_MOUSEMOVE) {
+			mouse = GetPos(e)
+		}
 		if equals(GetType(e), const EVENT_MOUSEWHEEL) {
 			fontSize = sum(fontSize, GetWheel(e))
 			if equals(fontSize, 0) {

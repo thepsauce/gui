@@ -11,6 +11,11 @@ int renderer_SetDrawColorRGB(Renderer *renderer, Uint8 r, Uint8 g, Uint8 b)
 	return SDL_SetRenderDrawColor(renderer, r, g, b, 255);
 }
 
+int renderer_DrawRect(Renderer *renderer, Rect *rect)
+{
+	return SDL_RenderDrawRect(renderer, rect);
+}
+
 int renderer_FillRect(Renderer *renderer, Rect *rect)
 {
 	return SDL_RenderFillRect(renderer, rect);
@@ -21,54 +26,54 @@ int renderer_DrawLine(Renderer *renderer, Sint32 x1, Sint32 y1, Sint32 x2, Sint3
 	return SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
 }
 
-int renderer_DrawEllipse(Renderer *renderer, Sint32 x, Sint32 y, Sint32 rx, Sint32 ry)
+int renderer_DrawEllipse(Renderer *renderer, Sint32 x, Sint32 y, Sint32 w, Sint32 h)
 {
 	int result;
 	Sint32 ix, iy;
-	Sint32 h, i, j, k;
-	Sint32 oh, oi, oj, ok;
-	Sint32 xmh, xph, ypk, ymk;
+	Sint32 l, i, j, k;
+	Sint32 ol, oi, oj, ok;
+	Sint32 xml, xpl, ypk, ymk;
 	Sint32 xmi, xpi, ymj, ypj;
 	Sint32 xmj, xpj, ymi, ypi;
-	Sint32 xmk, xpk, ymh, yph;
+	Sint32 xmk, xpk, yml, ypl;
 
-	if (rx < 0 || ry < 0) {
+	if (w < 0 || h < 0) {
 		return -1;
 	}
-	if (rx == 0) {
-		return SDL_RenderDrawLine(renderer, x, y - ry, x, y + ry);
+	if (w == 0) {
+		return SDL_RenderDrawLine(renderer, x, y, x, y + h);
 	}
-	if (ry == 0) {
-		return SDL_RenderDrawLine(renderer, x - rx, y, x + rx, y);
+	if (h == 0) {
+		return SDL_RenderDrawLine(renderer, x, y, x + w, y);
 	}
 
 	result = 0;
-	oh = oi = oj = ok = 0xFFFF;
+	ol = oi = oj = ok = INT32_MAX;
 
 	/* Draw */
-	if (rx > ry) {
+	if (w > h) {
 		ix = 0;
-		iy = rx * 64;
+		iy = 32 * w;
 
 		do {
-			h = (ix + 32) >> 6;
+			l = (ix + 32) >> 6;
 			i = (iy + 32) >> 6;
-			j = (h * ry) / rx;
-			k = (i * ry) / rx;
+			j = (h * h) / w;
+			k = (i * h) / w;
 
 			if ((ok != k && oj != k) || (oj != j && ok != j) || k != j) {
-				xph = x + h;
-				xmh = x - h;
+				xpl = x + l;
+				xml = x - l;
 				if (k > 0) {
 					ypk = y + k;
 					ymk = y - k;
-					result |= SDL_RenderDrawPoint(renderer, xmh, ypk);
-					result |= SDL_RenderDrawPoint(renderer, xph, ypk);
-					result |= SDL_RenderDrawPoint(renderer, xmh, ymk);
-					result |= SDL_RenderDrawPoint(renderer, xph, ymk);
+					result |= SDL_RenderDrawPoint(renderer, xml, ypk);
+					result |= SDL_RenderDrawPoint(renderer, xpl, ypk);
+					result |= SDL_RenderDrawPoint(renderer, xml, ymk);
+					result |= SDL_RenderDrawPoint(renderer, xpl, ymk);
 				} else {
-					result |= SDL_RenderDrawPoint(renderer, xmh, y);
-					result |= SDL_RenderDrawPoint(renderer, xph, y);
+					result |= SDL_RenderDrawPoint(renderer, xml, y);
+					result |= SDL_RenderDrawPoint(renderer, xpl, y);
 				}
 				ok = k;
 				xpi = x + i;
@@ -87,21 +92,21 @@ int renderer_DrawEllipse(Renderer *renderer, Sint32 x, Sint32 y, Sint32 rx, Sint
 				oj = j;
 			}
 
-			ix = ix + iy / rx;
-			iy = iy - ix / rx;
+			ix = ix + iy / w / 2;
+			iy = iy - ix / w / 2;
 
-		} while (i > h);
+		} while (i > l);
 	} else {
 		ix = 0;
-		iy = ry * 64;
+		iy = 32 * h;
 
 		do {
-			h = (ix + 32) >> 6;
+			l = (ix + 32) >> 6;
 			i = (iy + 32) >> 6;
-			j = (h * rx) / ry;
-			k = (i * rx) / ry;
+			j = (l * w) / h;
+			k = (i * w) / h;
 
-			if (((oi != i) && (oh != i)) || ((oh != h) && (oi != h) && (i != h))) {
+			if (((oi != i) && (ol != i)) || ((ol != l) && (oi != l) && (i != l))) {
 				xmj = x - j;
 				xpj = x + j;
 				if (i > 0) {
@@ -119,71 +124,71 @@ int renderer_DrawEllipse(Renderer *renderer, Sint32 x, Sint32 y, Sint32 rx, Sint
 				xmk = x - k;
 				xpk = x + k;
 				if (h > 0) {
-					yph = y + h;
-					ymh = y - h;
-					result |= SDL_RenderDrawPoint(renderer, xmk, yph);
-					result |= SDL_RenderDrawPoint(renderer, xpk, yph);
-					result |= SDL_RenderDrawPoint(renderer, xmk, ymh);
-					result |= SDL_RenderDrawPoint(renderer, xpk, ymh);
+					ypl = y + l;
+					yml = y - l;
+					result |= SDL_RenderDrawPoint(renderer, xmk, ypl);
+					result |= SDL_RenderDrawPoint(renderer, xpk, ypl);
+					result |= SDL_RenderDrawPoint(renderer, xmk, yml);
+					result |= SDL_RenderDrawPoint(renderer, xpk, yml);
 				} else {
 					result |= SDL_RenderDrawPoint(renderer, xmk, y);
 					result |= SDL_RenderDrawPoint(renderer, xpk, y);
 				}
-				oh = h;
+				ol = l;
 			}
 
-			ix = ix + iy / ry;
-			iy = iy - ix / ry;
+			ix = ix + iy / h / 2;
+			iy = iy - ix / h / 2;
 
-		} while (i > h);
+		} while (i > l);
 	}
 	return result;
 }
 
-int renderer_FillEllipse(SDL_Renderer *renderer, Sint32 x, Sint32 y, Sint32 rx, Sint32 ry)
+int renderer_FillEllipse(SDL_Renderer *renderer, Sint32 x, Sint32 y, Sint32 w, Sint32 h)
 {
 	int result;
 	Sint32 ix, iy;
-	Sint32 h, i, j, k;
-	Sint32 oh, oi, oj, ok;
-	Sint32 xmh, xph;
+	Sint32 l, i, j, k;
+	Sint32 ol, oi, oj, ok;
+	Sint32 xml, xpl;
 	Sint32 xmi, xpi;
 	Sint32 xmj, xpj;
 	Sint32 xmk, xpk;
 
-	if (rx < 0 || ry < 0) {
+	if (w < 0 || h < 0) {
 		return -1;
 	}
-	if (rx == 0) {
-		return SDL_RenderDrawLine(renderer, x, y - ry, x, y + ry);
+	if (w == 0) {
+		return SDL_RenderDrawLine(renderer, x, y, x, y + h);
 	}
-	if (ry == 0) {
-		return SDL_RenderDrawLine(renderer, x - rx, y, x + rx, y);
+	if (h == 0) {
+		return SDL_RenderDrawLine(renderer, x, y, x + w, y);
 	}
 
 	result = 0;
 
-	oh = oi = oj = ok = 0xFFFF;
+	ol = oi = oj = ok = 0xFFFF;
 
 	/* Draw */
-	if (rx > ry) {
+	if (w > h) {
 		ix = 0;
-		iy = rx * 64;
+		iy = 32 * w;
 
 		do {
-			h = (ix + 32) >> 6;
+			l = (ix + 32) >> 6;
 			i = (iy + 32) >> 6;
-			j = (h * ry) / rx;
-			k = (i * ry) / rx;
+			j = (l * h) / w;
+			k = (i * h) / w;
 
 			if ((ok != k) && (oj != k)) {
-				xph = x + h;
-				xmh = x - h;
+				xpl = x + l;
+				xml = x - l;
 				if (k > 0) {
-					result |= SDL_RenderDrawLine(renderer, xmh, y + k, xph, y + k);
-					result |= SDL_RenderDrawLine(renderer, xmh, y - k, xph, y - k);
+					result |= SDL_RenderDrawLine(renderer, xml, y + k, xpl, y + k);
+					result |= SDL_RenderDrawLine(renderer, xml, y - k, xpl, y - k);
 				} else {
-					result |= SDL_RenderDrawLine(renderer, xmh, y, xph, y);
+					result |= SDL_RenderDrawLine(renderer, xml, y, xpl, y);
 				}
 				ok = k;
 			}
@@ -199,21 +204,21 @@ int renderer_FillEllipse(SDL_Renderer *renderer, Sint32 x, Sint32 y, Sint32 rx, 
 				oj = j;
 			}
 
-			ix = ix + iy / rx;
-			iy = iy - ix / rx;
+			ix = ix + iy / w / 2;
+			iy = iy - ix / w / 2;
 
-		} while (i > h);
+		} while (i > l);
 	} else {
 		ix = 0;
-		iy = ry * 64;
+		iy = 32 * h;
 
 		do {
-			h = (ix + 32) >> 6;
+			l = (ix + 32) >> 6;
 			i = (iy + 32) >> 6;
-			j = (h * rx) / ry;
-			k = (i * rx) / ry;
+			j = (l * w) / h;
+			k = (i * w) / h;
 
-			if ((oi != i) && (oh != i)) {
+			if ((oi != i) && (ol != i)) {
 				xmj = x - j;
 				xpj = x + j;
 				if (i > 0) {
@@ -224,28 +229,28 @@ int renderer_FillEllipse(SDL_Renderer *renderer, Sint32 x, Sint32 y, Sint32 rx, 
 				}
 				oi = i;
 			}
-			if ((oh != h) && (oi != h) && (i != h)) {
+			if ((ol != l) && (oi != l) && (i != l)) {
 				xmk = x - k;
 				xpk = x + k;
-				if (h > 0) {
-					result |= SDL_RenderDrawLine(renderer, xmk, y + h, xpk, y + h);
-					result |= SDL_RenderDrawLine(renderer, xmk, y - h, xpk, y - h);
+				if (l > 0) {
+					result |= SDL_RenderDrawLine(renderer, xmk, y + l, xpk, y + l);
+					result |= SDL_RenderDrawLine(renderer, xmk, y - l, xpk, y - l);
 				} else {
 					result |= SDL_RenderDrawLine(renderer, xmk, y, xpk, y);
 				}
-				oh = h;
+				ol = l;
 			}
 
-			ix = ix + iy / ry;
-			iy = iy - ix / ry;
+			ix = ix + iy / h / 2;
+			iy = iy - ix / h / 2;
 
-		} while (i > h);
+		} while (i > l);
 	}
 
 	return result;
 }
 
-struct font *fonts;
+struct font *cached_fonts;
 
 Uint32 num_fonts;
 Uint32 cur_font;
@@ -261,7 +266,7 @@ static Uint32 AddFont(Font *font)
 	name = TTF_FontFaceFamilyName(font);
 	height = TTF_FontHeight(font);
 	for (iFont = 0; iFont < num_fonts; iFont++) {
-		other = fonts[iFont].font;
+		other = cached_fonts[iFont].font;
 		otherHeight = TTF_FontHeight(other);
 		otherName = TTF_FontFaceFamilyName(other);
 		if (height == otherHeight && strcmp(name, otherName) == 0) {
@@ -270,15 +275,15 @@ static Uint32 AddFont(Font *font)
 	}
 
 	if (iFont == num_fonts) {
-		newFonts = union_Realloc(union_Default(), fonts,
+		newFonts = union_Realloc(union_Default(), cached_fonts,
 				sizeof(*newFonts) * (num_fonts + 1));
 		if (newFonts == NULL) {
 			return UINT32_MAX;
 		}
-		fonts = newFonts;
-		fonts[num_fonts].font = font;
-		fonts[num_fonts].cachedWords = NULL;
-		fonts[num_fonts].numCachedWords = 0;
+		cached_fonts = newFonts;
+		cached_fonts[num_fonts].font = font;
+		cached_fonts[num_fonts].cachedWords = NULL;
+		cached_fonts[num_fonts].numCachedWords = 0;
 		num_fonts++;
 	}
 	return iFont;
@@ -330,14 +335,14 @@ Font *renderer_GetFont(Uint32 index)
 	if (index >= num_fonts) {
 		return NULL;
 	}
-	return fonts[index].font;
+	return cached_fonts[index].font;
 }
 
 static struct word *GetCachedWord(const char *data)
 {
 	struct font font;
 
-	font = fonts[cur_font];
+	font = cached_fonts[cur_font];
 	for (Uint32 i = 0; i < font.numCachedWords; i++) {
 		struct word *const word = &font.cachedWords[i];
 		if (strcmp(word->data, data) == 0) {
@@ -361,7 +366,7 @@ static struct word *CacheWord(Renderer *renderer, const char *data)
 
 	Size len;
 
-	font = &fonts[cur_font];
+	font = &cached_fonts[cur_font];
 
 	newWords = union_Realloc(union_Default(), font->cachedWords,
 			sizeof(*newWords) * (font->numCachedWords + 1));
@@ -388,6 +393,10 @@ static struct word *CacheWord(Renderer *renderer, const char *data)
 
 	len = strlen(data);
 	word.data = union_Alloc(union_Default(), len + 1);
+	if (word.data == NULL) {
+		SDL_DestroyTexture(word.texture);
+		return NULL;
+	}
 	memcpy(word.data, data, len);
 	word.data[len] = '\0';
 
@@ -407,7 +416,7 @@ int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y)
 	struct word *word;
 	Rect textRect;
 
-	font = &fonts[cur_font];
+	font = &cached_fonts[cur_font];
 
 	SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a);
 
