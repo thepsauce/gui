@@ -443,6 +443,41 @@ static int ReadBool(struct parser *parser)
 	return -1;
 }
 
+static int ReadInts(struct parser *parser, Sint64 *ints, Uint32 maxNumInts,
+		Uint32 *pNumInts)
+{
+	Uint32 i = 0;
+	Value v;
+
+	if (parser->c != '(') {
+		return -1;
+	}
+	NextChar(parser); /* skip '(' */
+	SkipSpace(parser);
+	while (parser->c != ')') {
+		if (i == maxNumInts) {
+			return -1;
+		}
+		if (ReadValue(parser) < 0) {
+			return -1;
+		}
+		SkipSpace(parser);
+		if (parser->c == ',') {
+			NextChar(parser); /* skip ',' */
+			SkipSpace(parser);
+		} else if (parser->c != ')') {
+			return -1;
+		}
+		if (value_Cast(&parser->value, TYPE_INTEGER, &v) < 0) {
+			return -1;
+		}
+		ints[i++] = v.i;
+	}
+	NextChar(parser); /* skip ')' */
+	*pNumInts = i;
+	return 0;
+}
+
 static int ReadColor(struct parser *parser)
 {
 	static const struct {
@@ -467,11 +502,51 @@ static int ReadColor(struct parser *parser)
 		{ "navy", 0xff000080 }
 	};
 
+	Sint64 argb[4];
+	Uint32 num;
+	char *w;
+
 	if (isalpha(parser->c)) {
 		if (ReadWord(parser) < 0) {
 			return -1;
 		}
-		/* TODO: maybe handle rgb value (with rgb keyword) */
+		w = parser->word;
+		if (w[0] == 'a') {
+			w++;
+		}
+		if (strcmp(w, "rgb") == 0) {
+			if (ReadInts(parser, argb, ARRLEN(argb), &num) < 0) {
+				return -1;
+			}
+			switch (num) {
+			case 0:
+				parser->value.c = 0;
+				break;
+			case 1: {
+				const Uint8 gray = argb[0];
+				parser->value.c = 0xff000000 |
+					(gray << 16) | (gray << 8) | gray;
+				break;
+			}
+			case 3: {
+				const Uint8 r = argb[0], g = argb[1],
+					b = argb[2];
+				parser->value.c = 0xff000000 |
+					(r << 16) | (g << 8) | b;
+				break;
+			}
+			case 4: {
+				const Uint8 a = argb[0], r = argb[1],
+					g = argb[2], b = argb[3];
+				parser->value.c = (a << 24) |
+					(r << 16) | (g << 8) | b;
+				break;
+			}
+			default:
+				return -1;
+			}
+			return 0;
+		}
 		for (size_t i = 0; i < ARRLEN(colors); i++) {
 			if (strcmp(colors[i].name, parser->word) == 0) {
 				parser->value.c = colors[i].color;
@@ -638,59 +713,48 @@ static int ReadInt(struct parser *parser)
 	return 0;
 }
 
-static int ReadInts(struct parser *parser, Sint64 *ints, Uint32 numInts)
-{
-	Uint32 i = 0;
-	Value v;
-
-	if (parser->c != '(') {
-		return -1;
-	}
-	NextChar(parser); /* skip '(' */
-	SkipSpace(parser);
-	memset(ints, 0, sizeof(*ints) * numInts);
-	while (parser->c != ')') {
-		if (ReadValue(parser) < 0) {
-			return -1;
-		}
-		SkipSpace(parser);
-		if (parser->c == ',') {
-			NextChar(parser); /* skip ',' */
-			SkipSpace(parser);
-		} else if (parser->c != ')') {
-			return -1;
-		}
-		if (value_Cast(&parser->value, TYPE_INTEGER, &v) < 0) {
-			return -1;
-		}
-		ints[i++] = v.i;
-		if (i == numInts) {
-			break;
-		}
-	}
-	NextChar(parser); /* skip ')' */
-	return 0;
-}
-
 static int ReadPoint(struct parser *parser)
 {
 	Sint64 nums[2];
+	Uint32 num;
 
-	if (ReadInts(parser, nums, ARRLEN(nums)) < 0) {
+	if (ReadInts(parser, nums, ARRLEN(nums), &num) < 0) {
 		return -1;
 	}
-	parser->value.p = (Point) { nums[0], nums[1] };
+	switch (num) {
+	case 0:
+		parser->value.p = (Point) { 0, 0 };
+		break;
+	case 2:
+		parser->value.p = (Point) { nums[0], nums[1] };
+		break;
+	default:
+		return -1;
+	}
 	return 0;
 }
 
 static int ReadRect(struct parser *parser)
 {
 	Sint64 nums[4];
+	Uint32 num;
 
-	if (ReadInts(parser, nums, ARRLEN(nums)) < 0) {
+	if (ReadInts(parser, nums, ARRLEN(nums), &num) < 0) {
 		return -1;
 	}
-	parser->value.r = (Rect) { nums[0], nums[1], nums[2], nums[3] };
+	switch (num) {
+	case 0:
+		parser->value.r = (Rect) { 0, 0, 0, 0 };
+		break;
+	case 2:
+		parser->value.r = (Rect) { .w = nums[0], .h = nums[1] };
+		break;
+	case 4:
+		parser->value.r = (Rect) { nums[0], nums[1], nums[2], nums[3] };
+		break;
+	default:
+		return -1;
+	}
 	return 0;
 }
 

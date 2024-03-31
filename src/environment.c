@@ -204,10 +204,10 @@ static int GetSubVariable(const char *name, const char *sub, Value *value)
 		}
 		switch (sub[0]) {
 		case 'x':
-			value->i = pValue->r.x;
+			value->i = pValue->p.x;
 			break;
 		case 'y':
-			value->i = pValue->r.y;
+			value->i = pValue->p.y;
 			break;
 		default:
 			return -1;
@@ -316,10 +316,10 @@ static int SetSubVariable(const char *name, const char *sub, Value *value)
 		}
 		switch (sub[0]) {
 		case 'x':
-			pValue->r.x = actual.i;
+			pValue->p.x = actual.i;
 			break;
 		case 'y':
-			pValue->r.y = actual.i;
+			pValue->p.y = actual.i;
 			break;
 		default:
 			return -1;
