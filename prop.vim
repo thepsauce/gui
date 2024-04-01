@@ -39,12 +39,12 @@ syn keyword PropertyValueTypes array bool color function int float string
 syn keyword PropertyValueSpecialTypes event point rect view
 syn keyword PropertyValueKeywords default black white red green blue yellow cyan magenta gray orange purple brown pink olive teal navy false true
 
-syn match PropertyValueInt "\v0x[a-fA-F0-9]+|0b[01]+|0c[0-7]+|[0-9]+"
-
 syn match PropertyValueFloat "\v\.[0-9]+([Ee][+-]?[0-9]+)?"
 syn match PropertyValueFloat "\v[0-9]+\.([Ee][+-]?[0-9]+)?"
 syn match PropertyValueFloat "\v[0-9]+\.[0-9]+([Ee][+-]?[0-9]+)?"
 syn match PropertyValueFloat "\v[0-9]+([Ee][+-]?[0-9]+)?"
+
+syn match PropertyValueInt "\v(0x[a-fA-F0-9]+)|((0b[01]+)|(0c[0-7]+)|([0-9]+)([Ee][+-]?[0-9]+)?)"
 
 hi link PropertyValueTypes Type
 hi link PropertyValueSpecialTypes Macro
@@ -58,7 +58,7 @@ syn match PropertyInvoke "\<\h\k*\ze("
 
 hi link PropertyInvoke cFunction
 
-syn match PropertyOperators "[{}[\],()=:]"
+syn match PropertyOperators "[{}[\],()=:<>]"
 
 hi link PropertyOperators Operator
 

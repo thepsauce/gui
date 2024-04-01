@@ -145,21 +145,9 @@ static Property *SearchVariable(const char *name, Value **pValue)
 	return NULL;
 }
 
-static int GetSubVariable(const char *name, const char *sub, Value *value)
+static int GetSubVariable(Value *value, const char *sub, Value *result)
 {
-	Value *pValue;
-
-	if (strcmp(name, "this") == 0) {
-		if (_SearchVariable(environment.view, sub, &pValue) == NULL) {
-			return -1;
-		}
-		*value = *pValue;
-		return 0;
-	}
-	if (SearchVariable(name, &pValue) == NULL) {
-		return -1;
-	}
-	switch (pValue->type) {
+	switch (value->type) {
 	case TYPE_NULL:
 	case TYPE_ARRAY:
 	case TYPE_BOOL:
@@ -171,22 +159,22 @@ static int GetSubVariable(const char *name, const char *sub, Value *value)
 		return -1;
 
 	case TYPE_COLOR:
-		value->type = TYPE_INTEGER;
+		result->type = TYPE_INTEGER;
 		if (sub[0] == '\0' || sub[1] != '\0') {
 			return -1;
 		}
 		switch (sub[0]) {
 		case 'a':
-			value->i = (pValue->i >> 24) & 0xff;
+			result->i = (value->i >> 24) & 0xff;
 			break;
 		case 'r':
-			value->i = (pValue->i >> 16) & 0xff;
+			result->i = (value->i >> 16) & 0xff;
 			break;
 		case 'g':
-			value->i = (pValue->i >> 8) & 0xff;
+			result->i = (value->i >> 8) & 0xff;
 			break;
 		case 'b':
-			value->i = pValue->i & 0xff;
+			result->i = value->i & 0xff;
 			break;
 		default:
 			return -1;
@@ -198,16 +186,16 @@ static int GetSubVariable(const char *name, const char *sub, Value *value)
 		return -1;
 
 	case TYPE_POINT:
-		value->type = TYPE_INTEGER;
+		result->type = TYPE_INTEGER;
 		if (sub[0] == '\0' || sub[1] != '\0') {
 			return -1;
 		}
 		switch (sub[0]) {
 		case 'x':
-			value->i = pValue->p.x;
+			result->i = value->p.x;
 			break;
 		case 'y':
-			value->i = pValue->p.y;
+			result->i = value->p.y;
 			break;
 		default:
 			return -1;
@@ -215,22 +203,22 @@ static int GetSubVariable(const char *name, const char *sub, Value *value)
 		break;
 
 	case TYPE_RECT:
-		value->type = TYPE_INTEGER;
+		result->type = TYPE_INTEGER;
 		if (sub[0] == '\0' || sub[1] != '\0') {
 			return -1;
 		}
 		switch (sub[0]) {
 		case 'x':
-			value->i = pValue->r.x;
+			result->i = value->r.x;
 			break;
 		case 'y':
-			value->i = pValue->r.y;
+			result->i = value->r.y;
 			break;
 		case 'w':
-			value->i = pValue->r.w;
+			result->i = value->r.w;
 			break;
 		case 'h':
-			value->i = pValue->r.h;
+			result->i = value->r.h;
 			break;
 		default:
 			return -1;
@@ -238,34 +226,20 @@ static int GetSubVariable(const char *name, const char *sub, Value *value)
 		break;
 
 	case TYPE_VIEW:
-		if (_SearchVariable(pValue->v, sub, &pValue) == NULL) {
+		if (_SearchVariable(value->v, sub, &value) == NULL) {
 			return -1;
 		}
-		*value = *pValue;
+		*result = *value;
 		break;
 	}
 	return 0;
 }
 
-static int SetSubVariable(const char *name, const char *sub, Value *value)
+static int SetSubVariable(Value *value, const char *sub, Value *result)
 {
-	Value *pValue;
 	Value actual;
 
-	if (strcmp(name, "this") == 0) {
-		if (_SearchVariable(environment.view, sub, &pValue) == NULL) {
-			return -1;
-		}
-		if (value_Cast(value, pValue->type, &actual) < 0) {
-			return -1;
-		}
-		*pValue = actual;
-		return 0;
-	}
-	if (SearchVariable(name, &pValue) == NULL) {
-		return -1;
-	}
-	switch (pValue->type) {
+	switch (value->type) {
 	case TYPE_NULL:
 	case TYPE_ARRAY:
 	case TYPE_BOOL:
@@ -280,26 +254,26 @@ static int SetSubVariable(const char *name, const char *sub, Value *value)
 		return -1;
 
 	case TYPE_COLOR:
-		value->type = TYPE_INTEGER;
+		result->type = TYPE_INTEGER;
 		if (sub[0] == '\0' || sub[1] != '\0') {
 			return -1;
 		}
 		switch (sub[0]) {
 		case 'a':
-			pValue->i &= ~0xff000000;
-			pValue->i |= (value->i & 0xff) << 24;
+			value->i &= ~0xff000000;
+			value->i |= (result->i & 0xff) << 24;
 			break;
 		case 'r':
-			pValue->i &= ~0xff0000;
-			pValue->i |= (value->i & 0xff) << 16;
+			value->i &= ~0xff0000;
+			value->i |= (result->i & 0xff) << 16;
 			break;
 		case 'g':
-			pValue->i &= ~0xff00;
-			pValue->i |= (value->i & 0xff) << 8;
+			value->i &= ~0xff00;
+			value->i |= (result->i & 0xff) << 8;
 			break;
 		case 'b':
-			pValue->i &= ~0xff;
-			pValue->i |= value->i & 0xff;
+			value->i &= ~0xff;
+			value->i |= result->i & 0xff;
 			break;
 		default:
 			return -1;
@@ -307,19 +281,19 @@ static int SetSubVariable(const char *name, const char *sub, Value *value)
 		break;
 
 	case TYPE_POINT:
-		if (value_Cast(value, TYPE_INTEGER, &actual) < 0) {
+		if (value_Cast(result, TYPE_INTEGER, &actual) < 0) {
 			return -1;
 		}
-		value->type = TYPE_INTEGER;
+		result->type = TYPE_INTEGER;
 		if (sub[0] == '\0' || sub[1] != '\0') {
 			return -1;
 		}
 		switch (sub[0]) {
 		case 'x':
-			pValue->p.x = actual.i;
+			value->p.x = actual.i;
 			break;
 		case 'y':
-			pValue->p.y = actual.i;
+			value->p.y = actual.i;
 			break;
 		default:
 			return -1;
@@ -327,25 +301,25 @@ static int SetSubVariable(const char *name, const char *sub, Value *value)
 		break;
 
 	case TYPE_RECT:
-		if (value_Cast(value, TYPE_INTEGER, &actual) < 0) {
+		if (value_Cast(result, TYPE_INTEGER, &actual) < 0) {
 			return -1;
 		}
-		value->type = TYPE_INTEGER;
+		result->type = TYPE_INTEGER;
 		if (sub[0] == '\0' || sub[1] != '\0') {
 			return -1;
 		}
 		switch (sub[0]) {
 		case 'x':
-			pValue->r.x = actual.i;
+			value->r.x = actual.i;
 			break;
 		case 'y':
-			pValue->r.y = actual.i;
+			value->r.y = actual.i;
 			break;
 		case 'w':
-			pValue->r.w = actual.i;
+			value->r.w = actual.i;
 			break;
 		case 'h':
-			pValue->r.h = actual.i;
+			value->r.h = actual.i;
 			break;
 		default:
 			return -1;
@@ -353,13 +327,13 @@ static int SetSubVariable(const char *name, const char *sub, Value *value)
 		break;
 
 	case TYPE_VIEW:
-		if (_SearchVariable(pValue->v, sub, &pValue) == NULL) {
+		if (_SearchVariable(value->v, sub, &value) == NULL) {
 			return -1;
 		}
-		if (value_Cast(value, pValue->type, &actual) < 0) {
+		if (value_Cast(result, value->type, &actual) < 0) {
 			return -1;
 		}
-		*pValue = actual;
+		*value = actual;
 		break;
 	}
 	return 0;
@@ -457,10 +431,12 @@ int function_Execute(Function *func, Instruction *args, Uint32 numArgs,
 	return 0;
 }
 
+static int ExecuteInstruction(Instruction *instr, Value *result);
+
 static int EvaluateInstruction(Instruction *instr, Value *result)
 {
 	Property *var;
-	Value *value;
+	Value *value, val;
 
 	switch (instr->instr) {
 	case INSTR_BREAK:
@@ -470,17 +446,11 @@ static int EvaluateInstruction(Instruction *instr, Value *result)
 	case INSTR_IF:
 	case INSTR_LOCAL:
 	case INSTR_RETURN:
-	case INSTR_SET:
-	case INSTR_SETSUB:
 	case INSTR_TRIGGER:
 	case INSTR_WHILE:
 		return -1;
-	case INSTR_GETSUB:
-		if (GetSubVariable(instr->getsub.variable, instr->getsub.sub,
-					result) < 0) {
-			return -1;
-		}
-		break;
+	case INSTR_SET:
+		return ExecuteInstruction(instr, result);
 	case INSTR_INVOKE:
 		var = SearchVariable(instr->invoke.name, NULL);
 		if (var == NULL || var->value.type != TYPE_FUNCTION) {
@@ -496,8 +466,10 @@ static int EvaluateInstruction(Instruction *instr, Value *result)
 		}
 		break;
 	case INSTR_INVOKESUB:
-		if (GetSubVariable(instr->invokesub.variable,
-					instr->invokesub.sub, result) < 0) {
+		if (EvaluateInstruction(instr->invokesub.from, result) < 0) {
+			return -1;
+		}
+		if (GetSubVariable(result, instr->invokesub.sub, result) < 0) {
 			return -1;
 		}
 		if (result->type != TYPE_FUNCTION) {
@@ -505,6 +477,13 @@ static int EvaluateInstruction(Instruction *instr, Value *result)
 		}
 		if (function_Execute(result->func, instr->invokesub.args,
 					instr->invokesub.numArgs, result) < 0) {
+			return -1;
+		}
+		break;
+	case INSTR_INVOKESYS:
+		if (ExecuteSystem(instr->invoke.name,
+				instr->invoke.args,
+				instr->invoke.numArgs, result) < 0) {
 			return -1;
 		}
 		break;
@@ -522,6 +501,15 @@ static int EvaluateInstruction(Instruction *instr, Value *result)
 		}
 		*result = *value;
 		break;
+	case INSTR_SUBVARIABLE:
+		if (EvaluateInstruction(instr->subvariable.from, &val) < 0) {
+			return -1;
+		}
+		if (GetSubVariable(&val, instr->subvariable.name,
+					result) < 0) {
+			return -1;
+		}
+		break;
 	}
 	return 0;
 }
@@ -529,7 +517,7 @@ static int EvaluateInstruction(Instruction *instr, Value *result)
 static int ExecuteInstruction(Instruction *instr, Value *result)
 {
 	Property *var;
-	Value *pValue;
+	Value *pValue, val;
 	bool b;
 	Property *newStack;
 	Value out;
@@ -537,10 +525,10 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 	Uint32 index;
 
 	switch (instr->instr) {
-	case INSTR_GETSUB:
+	case INSTR_SUBVARIABLE:
+	case INSTR_THIS:
 	case INSTR_VALUE:
 	case INSTR_VARIABLE:
-	case INSTR_THIS:
 		break;
 	case INSTR_BREAK:
 		return 2;
@@ -651,8 +639,10 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 		break;
 
 	case INSTR_INVOKESUB:
-		if (GetSubVariable(instr->invokesub.variable,
-					instr->invokesub.sub, result) < 0) {
+		if (EvaluateInstruction(instr->invokesub.from, &val) < 0) {
+			return -1;
+		}
+		if (GetSubVariable(&val, instr->invokesub.sub, result) < 0) {
 			return -1;
 		}
 		if (result->type != TYPE_FUNCTION) {
@@ -660,6 +650,14 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 		}
 		if (function_Execute(result->func, instr->invokesub.args,
 					instr->invokesub.numArgs, result) < 0) {
+			return -1;
+		}
+		break;
+
+	case INSTR_INVOKESYS:
+		if (ExecuteSystem(instr->invoke.name,
+				instr->invoke.args,
+				instr->invoke.numArgs, result) < 0) {
 			return -1;
 		}
 		break;
@@ -685,29 +683,32 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 		return 1;
 
 	case INSTR_SET:
-		var = SearchVariable(instr->set.variable, &pValue);
-		if (var == NULL) {
+		if (EvaluateInstruction(instr->set.src, result) < 0) {
 			return -1;
 		}
-		if (EvaluateInstruction(instr->set.value, result) < 0) {
-			return -1;
-		}
-		if (value_Cast(result, var->value.type, &out) < 0) {
-			return -1;
-		}
-		if (pValue != NULL) {
-			*pValue = out;
+		if (instr->set.dest->instr == INSTR_VARIABLE) {
+			var = SearchVariable(instr->set.dest->variable.name,
+					&pValue);
+			if (var == NULL) {
+				return -1;
+			}
+			if (value_Cast(result, var->value.type, &out) < 0) {
+				return -1;
+			}
+			if (pValue != NULL) {
+				*pValue = out;
+			} else {
+				var->value = out;
+			}
+		} else if (instr->set.dest->instr == INSTR_SUBVARIABLE) {
+			if (EvaluateInstruction(instr->set.dest->subvariable.from, &val) < 0) {
+				return -1;
+			}
+			if (SetSubVariable(&val, instr->set.dest->subvariable.name,
+						result) < 0) {
+				return -1;
+			}
 		} else {
-			var->value = out;
-		}
-		break;
-
-	case INSTR_SETSUB:
-		if (EvaluateInstruction(instr->setsub.value, result) < 0) {
-			return -1;
-		}
-		if (SetSubVariable(instr->setsub.variable, instr->setsub.sub,
-					result) < 0) {
 			return -1;
 		}
 		break;
@@ -1075,6 +1076,49 @@ static int SystemGet(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
+static int Compare(Value *v1, Value *v2)
+{
+	Value av1, av2;
+
+	if (v1->type == TYPE_FLOAT || v2->type == TYPE_FLOAT) {
+		if (value_Cast(v1, TYPE_FLOAT, &av1) < 0) {
+			return -1;
+		}
+		if (value_Cast(v2, TYPE_FLOAT, &av2) < 0) {
+			return -1;
+		}
+		return av1.f < av2.f ? -1 : av1.f > av2.f ? 1 : 0;
+	} else {
+		if (value_Cast(v1, TYPE_INTEGER, &av1) < 0) {
+			return -1;
+		}
+		if (value_Cast(v2, TYPE_INTEGER, &av2) < 0) {
+			return -1;
+		}
+		return av1.i < av2.i ? -1 : av1.i > av2.i ? 1 : 0;
+	}
+}
+
+static int SystemGeq(Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs != 2) {
+		return -1;
+	}
+	result->type = TYPE_BOOL;
+	result->b = Compare(&args[0], &args[1]) >= 0;
+	return 0;
+}
+
+static int SystemGtr(Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs != 2) {
+		return -1;
+	}
+	result->type = TYPE_BOOL;
+	result->b = Compare(&args[0], &args[1]) > 0;
+	return 0;
+}
+
 static int SystemInsert(Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs < 2) {
@@ -1175,6 +1219,26 @@ static int SystemLength(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
+static int SystemLeq(Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs != 2) {
+		return -1;
+	}
+	result->type = TYPE_BOOL;
+	result->b = Compare(&args[0], &args[1]) <= 0;
+	return 0;
+}
+
+static int SystemLss(Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs != 2) {
+		return -1;
+	}
+	result->type = TYPE_BOOL;
+	result->b = Compare(&args[0], &args[1]) < 0;
+	return 0;
+}
+
 static int SystemMod(Value *args, Uint32 numArgs, Value *result)
 {
 	Value v1, v2;
@@ -1208,11 +1272,11 @@ static int SystemMul(Value *args, Uint32 numArgs, Value *result)
 	Value val;
 
 	result->type = TYPE_INTEGER;
-	result->f = 0;
-	result->i = 0;
+	result->i = 1;
 	for (Uint32 i = 0; i < numArgs; i++) {
 		if (args[i].type == TYPE_FLOAT) {
 			result->type = TYPE_FLOAT;
+			result->f = 1.0f;
 			break;
 		}
 	}
@@ -1791,8 +1855,12 @@ static int ExecuteSystem(const char *call,
 		{ "exists", SystemExists },
 		{ "file", SystemFile },
 		{ "get", SystemGet },
+		{ "geq", SystemGeq },
+		{ "gtr", SystemGtr },
 		{ "insert", SystemInsert },
 		{ "length", SystemLength },
+		{ "leq", SystemLeq },
+		{ "lss", SystemLss },
 		{ "mod", SystemMod },
 		{ "mul", SystemMul },
 		{ "name", SystemName },

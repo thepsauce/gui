@@ -206,15 +206,17 @@ typedef enum {
 	INSTR_BREAK,
 	INSTR_FOR,
 	INSTR_FORIN,
-	INSTR_GETSUB,
 	INSTR_GROUP,
 	INSTR_IF,
 	INSTR_INVOKE,
 	INSTR_INVOKESUB,
+	/* note that INVOKE can also be a system invoke
+	 * but INVOKESYS is explicit about it */
+	INSTR_INVOKESYS,
 	INSTR_LOCAL,
 	INSTR_RETURN,
 	INSTR_SET,
-	INSTR_SETSUB,
+	INSTR_SUBVARIABLE,
 	INSTR_THIS,
 	INSTR_TRIGGER,
 	INSTR_VALUE,
@@ -320,7 +322,7 @@ struct instr_invoke {
 };
 
 struct instr_invokesub {
-	char variable[MAX_WORD];
+	struct instruction *from;
 	char sub[MAX_WORD];
 	struct instruction *args;
 	Uint32 numArgs;
@@ -336,14 +338,8 @@ struct instr_return {
 };
 
 struct instr_set {
-	char variable[MAX_WORD];
-	struct instruction *value;
-};
-
-struct instr_setsub {
-	char variable[MAX_WORD];
-	char sub[MAX_WORD];
-	struct instruction *value;
+	struct instruction *dest;
+	struct instruction *src;
 };
 
 struct instr_trigger {
@@ -355,6 +351,11 @@ struct instr_value {
 };
 
 struct instr_variable {
+	char name[MAX_WORD];
+};
+
+struct instr_subvariable {
+	struct instruction *from;
 	char name[MAX_WORD];
 };
 
@@ -377,7 +378,7 @@ typedef struct instruction {
 		struct instr_local local;
 		struct instr_return ret;
 		struct instr_set set;
-		struct instr_setsub setsub;
+		struct instr_subvariable subvariable;
 		struct instr_trigger trigger;
 		struct instr_value value;
 		struct instr_variable variable;

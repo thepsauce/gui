@@ -615,7 +615,8 @@ static int ReadFloat(struct parser *parser)
 	return 0;
 }
 
-static int ReadInstruction(struct parser *parser);
+static int ReadInstruction(struct parser *parser, int precedence);
+static int _ReadInstruction(struct parser *parser);
 
 static int ReadBody(struct parser *parser)
 {
@@ -627,7 +628,7 @@ static int ReadBody(struct parser *parser)
 	}
 	NextChar(parser); /* skip '{' */
 	while (SkipSpace(parser), parser->c != '}') {
-		if (ReadInstruction(parser) < 0) {
+		if (_ReadInstruction(parser) < 0) {
 			return -1;
 		}
 		newInstructions = union_Realloc(union_Default(), instructions,
@@ -858,7 +859,7 @@ static int ReadFor(struct parser *parser)
 	}
 	SkipSpace(parser);
 	if (strcmp(parser->word, "from") == 0) {
-		if (ReadInstruction(parser) < 0) {
+		if (ReadInstruction(parser, 0) < 0) {
 			return -1;
 		}
 		from = union_Alloc(union_Default(), sizeof(*from));
@@ -871,7 +872,7 @@ static int ReadFor(struct parser *parser)
 			return -1;
 		}
 	} else if (strcmp(parser->word, "in") == 0) {
-		if (ReadInstruction(parser) < 0) {
+		if (ReadInstruction(parser, 0) < 0) {
 			return -1;
 		}
 		in = union_Alloc(union_Default(), sizeof(*in));
@@ -890,7 +891,7 @@ static int ReadFor(struct parser *parser)
 		if (strcmp(parser->word, "to") != 0) {
 			return -1;
 		}
-		if (ReadInstruction(parser) < 0) {
+		if (ReadInstruction(parser, 0) < 0) {
 			return -1;
 		}
 		to = union_Alloc(union_Default(), sizeof(*to));
@@ -901,7 +902,7 @@ static int ReadFor(struct parser *parser)
 		SkipSpace(parser);
 	}
 
-	if (ReadInstruction(parser) < 0) {
+	if (_ReadInstruction(parser) < 0) {
 		return -1;
 	}
 	iter = union_Alloc(union_Default(), sizeof(*iter));
@@ -931,12 +932,12 @@ static int ReadFor(struct parser *parser)
  */
 static int ReadIf(struct parser *parser)
 {
-	char text[5];
+	char text[sizeof("else")];
 	Instruction *iff;
 	Instruction *cond;
 	Instruction *els = NULL;
 
-	if (ReadInstruction(parser) < 0) {
+	if (ReadInstruction(parser, 0) < 0) {
 		return -1;
 	}
 	cond = union_Alloc(union_Default(), sizeof(*cond));
@@ -946,7 +947,7 @@ static int ReadIf(struct parser *parser)
 	*cond = parser->instruction;
 
 	SkipSpace(parser);
-	if (ReadInstruction(parser) < 0) {
+	if (_ReadInstruction(parser) < 0) {
 		return -1;
 	}
 	iff = union_Alloc(union_Default(), sizeof(*iff));
@@ -955,12 +956,12 @@ static int ReadIf(struct parser *parser)
 	}
 	*iff = parser->instruction;
 
-	if (LookAhead(parser, text, 5) == 5) {
+	if (LookAhead(parser, text, sizeof(text)) == sizeof(text)) {
 		if (memcmp(text, "else", 4) == 0 &&
 				!isalnum(text[4]) && text[4] != '_') {
 			ReadWord(parser);
 			SkipSpace(parser);
-			if (ReadInstruction(parser) < 0) {
+			if (_ReadInstruction(parser) < 0) {
 				return -1;
 			}
 			els = union_Alloc(union_Default(),
@@ -989,7 +990,7 @@ static int ReadInvoke(struct parser *parser)
 	 */
 	strcpy(name, parser->word);
 	while (parser->c != ')') {
-		if (ReadInstruction(parser) < 0) {
+		if (ReadInstruction(parser, 0) < 0) {
 			return -1;
 		}
 		/* NOT parser->uni! */
@@ -1025,7 +1026,7 @@ static int ReadLocal(struct parser *parser)
 	if (ReadWord(parser) < 0) {
 		return -1;
 	}
-	strcpy(parser->instruction.set.variable, parser->word);
+	strcpy(parser->instruction.local.name, parser->word);
 	SkipSpace(parser);
 	if (parser->c != '=') {
 		return -1;
@@ -1035,7 +1036,7 @@ static int ReadLocal(struct parser *parser)
 
 	/* save this because it will be overwritten */
 	const Instruction instruction = parser->instruction;
-	if (ReadInstruction(parser) < 0) {
+	if (ReadInstruction(parser, 0) < 0) {
 		return -1;
 	}
 	pInstr = union_Alloc(union_Default(), sizeof(*pInstr));
@@ -1045,7 +1046,7 @@ static int ReadLocal(struct parser *parser)
 	*pInstr = parser->instruction;
 	parser->instruction = instruction;
 	parser->instruction.instr = INSTR_LOCAL;
-	parser->instruction.set.value = pInstr;
+	parser->instruction.local.value = pInstr;
 	return 0;
 }
 
@@ -1053,7 +1054,7 @@ static int ReadReturn(struct parser *parser)
 {
 	Instruction *instr;
 
-	if (ReadInstruction(parser) < 0) {
+	if (ReadInstruction(parser, 0) < 0) {
 		return -1;
 	}
 	instr = union_Alloc(union_Default(), sizeof(*instr));
@@ -1087,7 +1088,7 @@ static int ReadWhile(struct parser *parser)
 	Instruction *cond;
 	Instruction *iter;
 
-	if (ReadInstruction(parser) < 0) {
+	if (ReadInstruction(parser, 0) < 0) {
 		return -1;
 	}
 	cond = union_Alloc(union_Default(), sizeof(*cond));
@@ -1097,7 +1098,7 @@ static int ReadWhile(struct parser *parser)
 	*cond = parser->instruction;
 
 	SkipSpace(parser);
-	if (ReadInstruction(parser) < 0) {
+	if (ReadInstruction(parser, 0) < 0) {
 		return -1;
 	}
 	iter = union_Alloc(union_Default(), sizeof(*iter));
@@ -1196,7 +1197,7 @@ static int ResolveConstant(struct parser *parser)
 	return -1;
 }
 
-static int ReadInstruction(struct parser *parser)
+static int _ReadInstruction(struct parser *parser)
 {
 	static const struct {
 		const char *word;
@@ -1241,7 +1242,6 @@ static int ReadInstruction(struct parser *parser)
 			return -1;
 		}
 		parser->value.type = TYPE_STRING;
-
 		parser->instruction.instr = INSTR_VALUE;
 		parser->instruction.value.value.type = parser->value.type;
 		parser->instruction.value.value.s = parser->value.s;
@@ -1267,7 +1267,6 @@ static int ReadInstruction(struct parser *parser)
 			return -1;
 		}
 		parser->value.type = type;
-
 		parser->instruction.instr = INSTR_VALUE;
 		parser->instruction.value.value = parser->value;
 		return 0;
@@ -1286,61 +1285,6 @@ static int ReadInstruction(struct parser *parser)
 		return 0;
 	}
 
-	if (parser->c == '.') {
-		char var[MAX_WORD];
-		char sub[MAX_WORD];
-
-		strcpy(var, parser->word);
-		NextChar(parser); /* skip '.' */
-		SkipSpace(parser);
-		if (ReadWord(parser) < 0) {
-			return -1;
-		}
-		strcpy(sub, parser->word);
-		SkipSpace(parser);
-		if (parser->c == '=') {
-			Instruction *pInstr;
-
-			NextChar(parser); /* skip '=' */
-			SkipSpace(parser);
-			if (ReadInstruction(parser) < 0) {
-				return -1;
-			}
-			pInstr = union_Alloc(union_Default(), sizeof(*pInstr));
-			if (pInstr == NULL) {
-				return -1;
-			}
-			*pInstr = parser->instruction;
-
-			parser->instruction.instr = INSTR_SETSUB;
-			strcpy(parser->instruction.setsub.variable, var);
-			strcpy(parser->instruction.setsub.sub, sub);
-			parser->instruction.setsub.value = pInstr;
-		} else if (parser->c == '(') {
-			Instruction *args;
-			Uint32 numArgs;
-
-			NextChar(parser); /* skip '(' */
-			SkipSpace(parser);
-			if (ReadInvoke(parser) < 0) {
-				return -1;
-			}
-			args = parser->instruction.invoke.args;
-			numArgs = parser->instruction.invoke.numArgs;
-
-			parser->instruction.instr = INSTR_INVOKESUB;
-			strcpy(parser->instruction.invokesub.variable, var);
-			strcpy(parser->instruction.invokesub.sub, sub);
-			parser->instruction.invokesub.args = args;
-			parser->instruction.invokesub.numArgs = numArgs;
-		} else {
-			parser->instruction.instr = INSTR_GETSUB;
-			strcpy(parser->instruction.getsub.variable, var);
-			strcpy(parser->instruction.getsub.sub, sub);
-		}
-		return 0;
-	}
-
 	/* only now do we skip space because the '.' operator is
 	 * not supposed to have any space between it and the previous word */
 	SkipSpace(parser);
@@ -1356,30 +1300,169 @@ static int ReadInstruction(struct parser *parser)
 		return ReadInvoke(parser);
 	}
 
-	if (parser->c == '=') {
-		Instruction *pInstr;
-		char var[MAX_WORD];
-
-		strcpy(var, parser->word);
-
-		NextChar(parser); /* skip '=' */
-		SkipSpace(parser);
-		if (ReadInstruction(parser) < 0) {
-			return -1;
-		}
-		pInstr = union_Alloc(union_Default(), sizeof(*pInstr));
-		if (pInstr == NULL) {
-			return -1;
-		}
-		*pInstr = parser->instruction;
-		parser->instruction.instr = INSTR_SET;
-		strcpy(parser->instruction.set.variable, var);
-		parser->instruction.set.value = pInstr;
-		return 0;
-	}
 	/* assume a variable */
 	parser->instruction.instr = INSTR_VARIABLE;
 	strcpy(parser->instruction.variable.name, parser->word);
+	return 0;
+}
+
+static int ReadInstruction(struct parser *parser, int precedence)
+{
+	struct {
+		char ch;
+		const char *sys;
+		int precedence;
+	} prefixes[] = {
+		{ '+', NULL, 1 },
+		{ '-', "neg", 1 },
+		{ '!', "not", 3 }
+	};
+	struct {
+		char ch;
+		char ext;
+		const char *sys;
+		int precedence;
+	} infixes[] = {
+		{ '=', '=', "equals", 2 },
+		{ '=', '\0', "=", 1 },
+		{ '>', '=', "geq", 2 },
+		{ '>', '\0', "gtr", 2 },
+		{ '<', '=', "leq", 2 },
+		{ '<', '\0', "lss", 2 },
+		{ '+', '\0', "sum", 3 },
+		{ '-', '\0', "sub", 3 },
+		{ '*', '\0', "mul", 4 },
+		{ '/', '\0', "div", 4 },
+		{ '%', '\0', "mod", 4 },
+		{ '.', '\0', ".", 5 }
+	};
+
+	Instruction instr;
+	char lhb[2];
+	char lh;
+	Instruction opr;
+
+	instr.instr = INSTR_BREAK;
+next_prefix:
+	for (Uint32 i = 0; i < ARRLEN(prefixes); i++) {
+		if (prefixes[i].ch == parser->c) {
+			if (prefixes[i].sys == NULL) {
+				goto next_prefix;
+			}
+			NextChar(parser);
+			SkipSpace(parser);
+			if (ReadInstruction(parser,
+						prefixes[i].precedence) < 0) {
+				return -1;
+			}
+			SkipSpace(parser);
+			instr.instr = INSTR_INVOKESYS;
+			strcpy(instr.invoke.name, prefixes[i].sys);
+			instr.invoke.args = union_Alloc(union_Default(),
+					sizeof(*instr.invoke.args));
+			if (instr.invoke.args == NULL) {
+				return -1;
+			}
+			instr.invoke.args[0] = parser->instruction;
+			instr.invoke.numArgs = 1;
+			break;
+		}
+	}
+
+	if (parser->c == '(') {
+		NextChar(parser); /* skip '(' */
+		SkipSpace(parser);
+		if (ReadInstruction(parser, 0) < 0) {
+			return -1;
+		}
+		instr = parser->instruction;
+		if (parser->c != ')') {
+			return -1;
+		}
+		NextChar(parser); /* skip ')' */
+		SkipSpace(parser);
+	}
+
+	if (instr.instr == INSTR_BREAK) {
+		if (_ReadInstruction(parser) < 0) {
+			return -1;
+		}
+		instr = parser->instruction;
+		SkipSpace(parser);
+	}
+
+	if (LookAhead(parser, lhb, 2) != 2) {
+		lh = 0;
+	} else {
+		lh = lhb[1];
+	}
+
+next_infix:
+	for (Uint32 i = 0; i < ARRLEN(infixes); i++) {
+		if (infixes[i].ch != parser->c) {
+			continue;
+		}
+		if (infixes[i].ext != '\0' && infixes[i].ext != lh) {
+			continue;
+		}
+		if (infixes[i].precedence <= precedence) {
+			parser->instruction = instr;
+			return 0;
+		}
+		if (infixes[i].ext != '\0') {
+			NextChar(parser);
+		}
+
+		/* these have special handles */
+		if (infixes[i].sys[0] == '=') {
+			if (instr.instr != INSTR_VARIABLE && instr.instr !=
+					INSTR_SUBVARIABLE) {
+				return -1;
+			}
+			opr.instr = INSTR_SET;
+			opr.set.dest = union_Alloc(union_Default(),
+					sizeof(*opr.set.dest));
+			if (opr.set.dest == NULL) {
+				return -1;
+			}
+			*opr.set.dest = instr;
+			opr.set.src = union_Alloc(union_Default(),
+					sizeof(*opr.set.src));
+			if (opr.set.src == NULL) {
+				return -1;
+			}
+			NextChar(parser); /* skip '=' */
+			SkipSpace(parser);
+			if (ReadInstruction(parser, infixes[i].precedence) < 0) {
+				return -1;
+			}
+			*opr.set.src = parser->instruction;
+			instr = opr;
+			goto next_infix;
+		} else if (parser->c == '.') {
+			/* TODO: */
+			return -2;
+		}
+
+		NextChar(parser);
+		SkipSpace(parser);
+		if (ReadInstruction(parser, infixes[i].precedence) < 0) {
+			return -1;
+		}
+		opr.invoke.args = union_Alloc(union_Default(),
+				sizeof(*instr.invoke.args) * 2);
+		if (opr.invoke.args == NULL) {
+			return -1;
+		}
+		opr.invoke.numArgs = 2;
+		opr.invoke.args[0] = instr;
+		opr.invoke.args[1] = parser->instruction;
+		opr.instr = INSTR_INVOKESYS;
+		strcpy(opr.invoke.name, infixes[i].sys);
+		instr = opr;
+		goto next_infix;
+	}
+	parser->instruction = instr;
 	return 0;
 }
 
@@ -1399,7 +1482,7 @@ static int ReadProperty(struct parser *parser)
 	}
 	NextChar(parser); /* skip '=' */
 	SkipSpace(parser);
-	if (ReadInstruction(parser) < 0) {
+	if (ReadInstruction(parser, 0) < 0) {
 		return -1;
 	}
 	parser->property.instruction = parser->instruction;
@@ -1494,7 +1577,7 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 			strcpy(parser.property.name, parser.word);
 			NextChar(&parser); /* skip '=' */
 			SkipSpace(&parser);
-			if (ReadInstruction(&parser) < 0) {
+			if (ReadInstruction(&parser, 0) < 0) {
 				goto fail;
 			}
 			parser.property.instruction = parser.instruction;
@@ -1549,6 +1632,7 @@ fail:
 		fprintf(stderr, "\033[31m");
 		fputc(parser.buffer[p], stderr);
 		fprintf(stderr, "\033[0m");
+		NextChar(&parser);
 	}
 	for (i = 0; i < 20; i++) {
 		const int c = NextChar(&parser);

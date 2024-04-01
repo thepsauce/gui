@@ -1,4 +1,23 @@
+expr = function {
+	local l = 1 + 2 * 3
+	print("1 + 2 * 3=", l, "\n")
+	local l = (1 + 2) * 3
+	print("(1 + 2) * 3=", l, "\n")
+}
+
 main = function {
+	if 2 < 3 {
+		print("ye\n")
+	} else {
+		print("no\n")
+	}
+	if (3 >= 4) {
+		print("help\n")
+	}
+	if (4 >= 3) {
+		print("pleh\n")
+	}
+	expr()
 	local l = float 2.3e-3
 	print("float 2.3e-3=", l, "\n")
 	local l = .23e2
@@ -8,7 +27,7 @@ main = function {
 	local l = 2.3e3
 	print("2.3e3=", l, "\n")
 	local l = 33
-	print("33=", l, "\n")
+	print("33=", 9, "\n")
 	local l = int 33e2
 	print("int 33e2=", l, "\n")
 	local l = 43e3
@@ -17,9 +36,11 @@ main = function {
 	print("2.2134e1=", l, "\n")
 	local l = 234e-1
 	print("234e-1=", l, "\n")
+	local l = 0b0.101e1
+	print("0b0.101e1=", l, "\n")
 	return 0
 }
-
+;
 Button:
 	.font = int 0
 	.fontSize = int 16
