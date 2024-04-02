@@ -6,7 +6,6 @@ int main(void)
 	Union uni;
 	RawWrapper *wrappers;
 	Uint32 numWrappers;
-	View *view;
 
 	if (gui_Init(GUI_INIT_CLASSES) < 0) {
 		return 1;
@@ -38,13 +37,5 @@ int main(void)
 			break;
 		}
 	}
-
-	view = view_Create("Button", &(Rect) { 10, 10, 80, 30 });
-	if (view == NULL) {
-		return 1;
-	}
-	view_SetParent(view, view_Default());
-	view = view_Create("Button", &(Rect) { 100, 10, 80, 30 });
-	view_SetParent(view, view_Default());
 	return gui_Run();
 }

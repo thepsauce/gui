@@ -1553,6 +1553,17 @@ static int SystemCreateView(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
+static int SystemDefaultView(Value *args, Uint32 numArgs, Value *result)
+{
+	(void) args;
+	if (numArgs != 0) {
+		return -1;
+	}
+	result->type = TYPE_VIEW;
+	result->v = view_Default();
+	return 0;
+}
+
 static int SystemDrawEllipse(Value *args, Uint32 numArgs, Value *result)
 {
 	Rect r;
@@ -1885,6 +1896,7 @@ static int ExecuteSystem(const char *call,
 		{ "Contains", SystemContains },
 		{ "CreateFont", SystemCreateFont },
 		{ "CreateView", SystemCreateView },
+		{ "DefaultView", SystemDefaultView },
 		{ "DrawRect", SystemDrawRect },
 		{ "DrawEllipse", SystemDrawEllipse },
 		{ "DrawText", SystemDrawText },

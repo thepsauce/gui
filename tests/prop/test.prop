@@ -53,33 +53,46 @@ main = function {
 	print("234e-1=", l, "\n")
 	local l = 0b0.101e1
 	print("0b0.101e1=", l, "\n")
+
+	local b = CreateView("Button", 10, 10, 80, 30)
+	SetParent(b, DefaultView())
+
 	return 0
 }
 
-Button:
-	:font = int 0
-	:fontSize = int 16
-	:mouse = point ()
-	:init = function {
+; The second and all following "Button:" are not needed as typing
+"Button:" alone will switch to that label. But it can be used as a
+stylistic choice, it reminds of C++ ;
+
+Button::font = int 0
+Button::fontSize = int 16
+Button::mouse = point ()
+
+Button::init = function {
+	font = CreateFont("FiraCode-Regular.ttf", fontSize)
+}
+
+Button::draw = function {
+	SetFont(font)
+	SetDrawColor(color white)
+	DrawText("Hello there\nWhat is this?", 30, 30)
+
+	DrawEllipse(80, 80, 30, 30)
+	FillEllipse(mouse.x, mouse.y, 30, 30)
+}
+
+Button::event = function event e {
+	; a == b is equivalent to equals(a, b) ;
+	; side note: a == b && b == c is equivalent to equals(a, b, c) ;
+	; This can also be written as "if (...) {" (additional round brackets) ;
+	if GetType(e) == const EVENT_MOUSEMOVE {
+		mouse = GetPos(e)
+	}
+	if GetType(e) == const EVENT_MOUSEWHEEL {
+		fontSize = fontSize + GetWheel(e)
+		if fontSize == 0 {
+			fontSize = 1
+		}
 		font = CreateFont("FiraCode-Regular.ttf", fontSize)
 	}
-	:draw = function {
-		SetFont(font)
-		SetDrawColor(color white)
-		DrawText("Hello there\nWhat is this?", 30, 30)
-
-		DrawEllipse(80, 80, 30, 30)
-		FillEllipse(mouse.x, mouse.y, 30, 30)
-	}
-	:event = function event e {
-		if equals(GetType(e), const EVENT_MOUSEMOVE) {
-			mouse = GetPos(e)
-		}
-		if equals(GetType(e), const EVENT_MOUSEWHEEL) {
-			fontSize = sum(fontSize, GetWheel(e))
-			if equals(fontSize, 0) {
-				fontSize = 1
-			}
-			font = CreateFont("FiraCode-Regular.ttf", fontSize)
-		}
-	}
+}

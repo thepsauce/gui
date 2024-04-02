@@ -13,7 +13,6 @@ struct parser {
 	int c;
 	char word[MAX_WORD];
 	int nWord;
-	char label[MAX_WORD];
 	Value value;
 	RawProperty property;
 	Instruction instruction;
@@ -1217,9 +1216,9 @@ static int ReadExpression(struct parser *parser, int precedence)
 		const char *sys;
 		int precedence;
 	} prefixes[] = {
-		{ '+', NULL, 1 },
-		{ '-', "neg", 1 },
-		{ '!', "not", 5 }
+		{ '+', NULL, 4 },
+		{ '-', "neg", 4 },
+		{ '!', "not", 6 }
 	};
 	struct {
 		char ch;
@@ -1227,19 +1226,29 @@ static int ReadExpression(struct parser *parser, int precedence)
 		const char *sys;
 		int precedence;
 	} infixes[] = {
+		/* this need to come before '=', '\0' so that they are not NOT
+		 * checked */
 		{ '!', '=', "notequals", 2 },
 		{ '=', '=', "equals", 2 },
+
 		{ '=', '\0', "=", 1 },
+
 		{ '>', '=', "geq", 2 },
 		{ '>', '\0', "gtr", 2 },
 		{ '<', '=', "leq", 2 },
 		{ '<', '\0', "lss", 2 },
-		{ '+', '\0', "sum", 3 },
-		{ '-', '\0', "sub", 3 },
-		{ '*', '\0', "mul", 4 },
-		{ '/', '\0', "div", 4 },
-		{ '%', '\0', "mod", 4 },
-		{ '.', '\0', ".", 6 }
+
+		{ '&', '&', "and", 3 },
+		{ '|', '|', "or", 3 },
+
+		{ '+', '\0', "sum", 4 },
+		{ '-', '\0', "sub", 4 },
+
+		{ '*', '\0', "mul", 5 },
+		{ '/', '\0', "div", 5 },
+		{ '%', '\0', "mod", 5 },
+
+		{ '.', '\0', ".", 7 }
 	};
 
 	Instruction instr;
@@ -1530,6 +1539,20 @@ static int wrapper_AddProperty(Union *uni, RawWrapper *wrapper,
 	return 0;
 }
 
+static inline Uint32 FindWrapper(const RawWrapper *wrappers,
+		Uint32 numWrappers,
+		const char *name)
+{
+	/* we search in reverse to maybe reduce lookup times */
+	for (Uint32 i = numWrappers; i > 0; ) {
+		i--;
+		if (strcmp(wrappers[i].label, name) == 0) {
+			return i;
+		}
+	}
+	return UINT32_MAX;
+}
+
 int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 		Uint32 *pNumWrappers)
 {
@@ -1537,7 +1560,7 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 	Uint32 numPtrs;
 	struct parser parser;
 	RawWrapper *wrappers, *newWrappers;
-	Uint32 numWrappers;
+	Uint32 numWrappers, curWrapper;
 
 	/* this is for convenience:
 	 * all parser functions allocate memory using the default union
@@ -1556,6 +1579,7 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 	if (wrappers == NULL) {
 		return -1;
 	}
+	curWrapper = 0;
 	numWrappers = 1;
 	memset(wrappers, 0, sizeof(*wrappers));
 
@@ -1587,16 +1611,22 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 		SkipSpace(&parser);
 		if (parser.c == ':') {
 			NextChar(&parser);
-			strcpy(parser.label, parser.word);
+			curWrapper = FindWrapper(wrappers, numWrappers,
+					parser.word);
+			if (curWrapper != UINT32_MAX) {
+				continue;
+			}
+
 			newWrappers = union_Realloc(&parser.uni, wrappers,
 					sizeof(*wrappers) * (numWrappers + 1));
 			if (newWrappers == NULL) {
 				goto fail;
 			}
 			wrappers = newWrappers;
-			strcpy(wrappers[numWrappers].label, parser.label);
+			strcpy(wrappers[numWrappers].label, parser.word);
 			wrappers[numWrappers].properties = NULL;
 			wrappers[numWrappers].numProperties = 0;
+			curWrapper = numWrappers;
 			numWrappers++;
 		} else if (parser.c == '=') {
 			strcpy(parser.property.name, parser.word);
