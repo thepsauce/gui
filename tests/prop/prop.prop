@@ -1,0 +1,59 @@
+Button:
+	:background = color 0xffffff
+	:foreground = color 0xff0000
+	:shadow = color 0xff0000
+	:outline = color 0x5b1200
+	:text = color 0x00ff00
+	:press = color black
+	:hover = color black
+	:circular = bool true
+	:font = int 0
+	:on_press = function {
+		circular = !circular
+		trigger happy
+	}
+
+Example:
+	; it is recommend to always include the type for variable
+	declarations otherwise the language will just pick what it
+	wants which is good for expressions (otherwise you would need to type:
+	`int 2 + int 4` instead of the simple: `2 + 4`), these are implicit types:
+	1. 284 - implicit int
+	2. "Hey" - implicit string
+	3. 2.3 - implicit float
+	4. 2.0e3 - implicit float
+	5. 2e3 - implicit int!
+	6. 'a' - implicit int
+	7. 0x2.3 - implicit float (hex format)
+	8. 2 + 3 - implicit int because 2 is an implicit int
+	and 3 is an implicit int. The sum of two implicit int types
+	gives another int. ;
+	:a = int 32
+	:b = int 64
+	; TODO: find a way to make this work ;
+	; The problem is that variables are tried to be found in
+	the view but this expression is executed while view (this)
+	is NULL (static mode) so rather this would need to be
+	executed on view creation ;
+	; :c = a + b ;
+	; :e = d(a, b) ;; e is now the same as c (ALSO GIVES AN ERROR!!) ;
+	:d = function int x, int y {
+		return x + y
+	}
+	:c = int 0
+	:e = int 0
+
+	:init = function {
+		; workaround: manually do it !! ;
+		c = a + b
+		e = d(a, b)
+		print("c=", c, ", e=", e, "\n")
+	}
+
+TicTacToe:
+	:enabled_3d = bool false
+
+main = function {
+	; this will run the init function of Example ;
+	CreateView("Example")
+}

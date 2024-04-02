@@ -1219,7 +1219,7 @@ static int ReadExpression(struct parser *parser, int precedence)
 	} prefixes[] = {
 		{ '+', NULL, 1 },
 		{ '-', "neg", 1 },
-		{ '!', "not", 3 }
+		{ '!', "not", 5 }
 	};
 	struct {
 		char ch;
@@ -1227,6 +1227,7 @@ static int ReadExpression(struct parser *parser, int precedence)
 		const char *sys;
 		int precedence;
 	} infixes[] = {
+		{ '!', '=', "notequals", 2 },
 		{ '=', '=', "equals", 2 },
 		{ '=', '\0', "=", 1 },
 		{ '>', '=', "geq", 2 },
@@ -1238,7 +1239,7 @@ static int ReadExpression(struct parser *parser, int precedence)
 		{ '*', '\0', "mul", 4 },
 		{ '/', '\0', "div", 4 },
 		{ '%', '\0', "mod", 4 },
-		{ '.', '\0', ".", 5 }
+		{ '.', '\0', ".", 6 }
 	};
 
 	Instruction instr;
@@ -1282,7 +1283,8 @@ static int ReadExpression(struct parser *parser, int precedence)
 		instr.instr = INSTR_GROUP;
 		instr.group.instructions = parser->instructions;
 		instr.group.numInstructions = parser->numInstructions;
-		return 0;
+		/* there can't be any operators after {} */
+		goto end;
 	} else if (parser->c == '(') {
 		NextChar(parser); /* skip '(' */
 		SkipSpace(parser);
@@ -1347,6 +1349,8 @@ static int ReadExpression(struct parser *parser, int precedence)
 					if (strcmp(keywords[i].word,
 								parser->word) ==
 							0) {
+						/* there can't be any operators
+						 * after a keyword */
 						return keywords[i].read(parser);
 					}
 				}
@@ -1382,8 +1386,9 @@ next_infix:
 			continue;
 		}
 		if (infixes[i].precedence <= precedence) {
-			parser->instruction = instr;
-			return 0;
+			/* the higher function will take care of
+			 * this operator */
+			goto end;
 		}
 		if (infixes[i].ext != '\0') {
 			NextChar(parser);
@@ -1481,6 +1486,7 @@ next_infix:
 		instr = opr;
 		goto next_infix;
 	}
+end:
 	parser->instruction = instr;
 	return 0;
 }

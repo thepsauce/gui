@@ -12,7 +12,7 @@ int main(void)
 		return 1;
 	}
 
-	fp = fopen("test.prop", "r");
+	fp = fopen("tests/prop/test.prop", "r");
 	if (prop_Parse(fp, &uni, &wrappers, &numWrappers) == 0) {
 		if (environment_Digest(wrappers, numWrappers) == 0) {
 		} else {

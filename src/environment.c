@@ -496,7 +496,9 @@ static int EvaluateInstruction(Instruction *instr, Value *result)
 		break;
 	case INSTR_VARIABLE:
 		var = SearchVariable(instr->variable.name, &value);
-		if (var == NULL) {
+		/* value is NULL means that this is a property of a view
+		 * but the current view is NULL (static mode) */
+		if (var == NULL || value == NULL) {
 			return -1;
 		}
 		*result = *value;
@@ -773,6 +775,27 @@ static int ExecuteInstructions(Instruction *instrs,
 	return 0;
 }
 
+static int SystemAnd(Value *args, Uint32 numArgs, Value *result)
+{
+	result->type = TYPE_BOOL;
+	result->b = true;
+	for (Uint32 i = 0; i < numArgs; i++) {
+		if (args[i].type != TYPE_BOOL &&
+				args[i].type != TYPE_INTEGER) {
+			return -1;
+		}
+		if (args[i].type == TYPE_BOOL && !args[i].b) {
+			result->b = false;
+			break;
+		}
+		if (args[i].type == TYPE_INTEGER && args[i].i == 0) {
+			result->b = false;
+			break;
+		}
+	}
+	return 0;
+}
+
 static int SystemDiv(Value *args, Uint32 numArgs, Value *result)
 {
 	Value val;
@@ -795,64 +818,6 @@ static int SystemDiv(Value *args, Uint32 numArgs, Value *result)
 		} else {
 			result->f /= val.f;
 		}
-	}
-	return 0;
-}
-
-static int SystemAnd(Value *args, Uint32 numArgs, Value *result)
-{
-	result->type = TYPE_BOOL;
-	result->b = true;
-	for (Uint32 i = 0; i < numArgs; i++) {
-		if (args[i].type != TYPE_BOOL &&
-				args[i].type != TYPE_INTEGER) {
-			return -1;
-		}
-		if (args[i].type == TYPE_BOOL && !args[i].b) {
-			result->b = false;
-			break;
-		}
-		if (args[i].type == TYPE_INTEGER && args[i].i == 0) {
-			result->b = false;
-			break;
-		}
-	}
-	return 0;
-}
-
-static int SystemOr(Value *args, Uint32 numArgs, Value *result)
-{
-	result->type = TYPE_BOOL;
-	result->b = false;
-	for (Uint32 i = 0; i < numArgs; i++) {
-		if (args[i].type != TYPE_BOOL &&
-				args[i].type != TYPE_INTEGER) {
-			return -1;
-		}
-		if (args[i].type == TYPE_BOOL && args[i].b) {
-			result->b = true;
-			break;
-		}
-		if (args[i].type == TYPE_INTEGER && args[i].i != 0) {
-			result->b = true;
-			break;
-		}
-	}
-	return 0;
-}
-
-static int SystemNot(Value *args, Uint32 numArgs, Value *result)
-{
-	if (numArgs != 1) {
-		return -1;
-	}
-	result->type = TYPE_BOOL;
-	if (args[0].type == TYPE_BOOL) {
-		result->b = !args[0].b;
-	} else if (args[0].type == TYPE_INTEGER) {
-		result->b = args[0].i == 0;
-	} else {
-		return -1;
 	}
 	return 0;
 }
@@ -1321,6 +1286,48 @@ static int SystemName(Value *args, Uint32 numArgs, Value *result)
 	result->type = TYPE_STRING;
 	result->s = s;
 	return 0;
+}
+
+static int SystemOr(Value *args, Uint32 numArgs, Value *result)
+{
+	result->type = TYPE_BOOL;
+	result->b = false;
+	for (Uint32 i = 0; i < numArgs; i++) {
+		if (args[i].type != TYPE_BOOL &&
+				args[i].type != TYPE_INTEGER) {
+			return -1;
+		}
+		if (args[i].type == TYPE_BOOL && args[i].b) {
+			result->b = true;
+			break;
+		}
+		if (args[i].type == TYPE_INTEGER && args[i].i != 0) {
+			result->b = true;
+			break;
+		}
+	}
+	return 0;
+}
+
+static int SystemNot(Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs != 1) {
+		return -1;
+	}
+	result->type = TYPE_BOOL;
+	if (args[0].type == TYPE_BOOL) {
+		result->b = !args[0].b;
+	} else if (args[0].type == TYPE_INTEGER) {
+		result->b = args[0].i == 0;
+	} else {
+		return -1;
+	}
+	return 0;
+}
+
+static int SystemNotEquals(Value *args, Uint32 numArgs, Value *result)
+{
+	return !SystemEquals(args, numArgs, result);
 }
 
 static void PrintValue(Value *value, FILE *fp)
@@ -1865,6 +1872,7 @@ static int ExecuteSystem(const char *call,
 		{ "mul", SystemMul },
 		{ "name", SystemName },
 		{ "not", SystemNot },
+		{ "notequals", SystemNotEquals },
 		{ "or", SystemOr },
 		{ "print", SystemPrint },
 		{ "rand", SystemRand },
@@ -1921,6 +1929,10 @@ static int MergeWithLabel(const RawWrapper *wrapper)
 	Property *newProperties;
 	RawProperty *raw;
 	Value val;
+
+	if (wrapper->numProperties == 0) {
+		return 0;
+	}
 
 	Label *const label = environment.cur;
 	const Uint32 num = label->numProperties;

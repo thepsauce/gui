@@ -58,7 +58,8 @@ hi link PropertyValueFloat Number
 
 hi link PropertyVariable cMember
 
-syn match PropertyOperators "[{}[\],.()=<>]"
+syn match PropertyOperators "[!{}[\],.()=<>+-/%]"
+syn match PropertyOperators "\*"
 
 hi link PropertyOperators Operator
 

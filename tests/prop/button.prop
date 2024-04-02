@@ -10,7 +10,7 @@ test = function {
 	print("Init\n")
 
 	local i = 0
-	while not(equals(i, 10)) {
+	while !(i == 10) {
 		i = sum(i, 1)
 		print(i, "\n")
 	}
@@ -64,22 +64,22 @@ main = function {
 }
 
 Button:
-	.background = color 0x60609f
-	.away = color red
-	.shadow = color red
-	.outline = color 0x5b1200
-	.text = color green
-	.press = color brown
-	.hover = color yellow
-	.is_hovered = bool false
-	.is_pressed = bool false
-	.has_spawned = bool false
-	.circular = bool true
-	.font = font default
+	:background = color 0x60609f
+	:away = color red
+	:shadow = color red
+	:outline = color 0x5b1200
+	:text = color green
+	:press = color brown
+	:hover = color yellow
+	:is_hovered = bool false
+	:is_pressed = bool false
+	:has_spawned = bool false
+	:circular = bool true
+	:font = int 0
 
-	.init = function {
+	:init = function {
 	}
-	.draw = function {
+	:draw = function {
 		local c = color 0
 		if is_pressed {
 			if is_hovered {
@@ -100,7 +100,7 @@ Button:
 		SetDrawColor(c)
 		FillRect(GetRect(this))
 	}
-	.event = function event e {
+	:event = function event e {
 		if equals(GetType(e), const EVENT_MOUSEMOVE) {
 			if Contains(GetRect(this), GetPos(e)) {
 				is_hovered = bool true

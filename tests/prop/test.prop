@@ -19,15 +19,18 @@ main = function {
 
 	print(color white.r, "\n")
 	if 2 < 3 {
-		print("ye\n")
+		print("2 < 3: ye\n")
 	} else {
-		print("no\n")
+		print("2 < 3: no\n")
 	}
 	if (3 >= 4) {
-		print("help\n")
+		print("3 >= 4: help\n")
 	}
 	if (4 >= 3) {
-		print("pleh\n")
+		print("4 >= 3: pleh\n")
+	}
+	if 2 != 3 {
+		print("2 != 3: yes\n")
 	}
 	expr()
 	local l = float 2.3e-3
@@ -52,7 +55,7 @@ main = function {
 	print("0b0.101e1=", l, "\n")
 	return 0
 }
-;
+
 Button:
 	:font = int 0
 	:fontSize = int 16
