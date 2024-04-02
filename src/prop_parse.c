@@ -615,8 +615,7 @@ static int ReadFloat(struct parser *parser)
 	return 0;
 }
 
-static int ReadInstruction(struct parser *parser, int precedence);
-static int _ReadInstruction(struct parser *parser);
+static int ReadExpression(struct parser *parser, int precedence);
 
 static int ReadBody(struct parser *parser)
 {
@@ -628,7 +627,7 @@ static int ReadBody(struct parser *parser)
 	}
 	NextChar(parser); /* skip '{' */
 	while (SkipSpace(parser), parser->c != '}') {
-		if (_ReadInstruction(parser) < 0) {
+		if (ReadExpression(parser, 0) < 0) {
 			return -1;
 		}
 		newInstructions = union_Realloc(union_Default(), instructions,
@@ -859,7 +858,7 @@ static int ReadFor(struct parser *parser)
 	}
 	SkipSpace(parser);
 	if (strcmp(parser->word, "from") == 0) {
-		if (ReadInstruction(parser, 0) < 0) {
+		if (ReadExpression(parser, 0) < 0) {
 			return -1;
 		}
 		from = union_Alloc(union_Default(), sizeof(*from));
@@ -872,7 +871,7 @@ static int ReadFor(struct parser *parser)
 			return -1;
 		}
 	} else if (strcmp(parser->word, "in") == 0) {
-		if (ReadInstruction(parser, 0) < 0) {
+		if (ReadExpression(parser, 0) < 0) {
 			return -1;
 		}
 		in = union_Alloc(union_Default(), sizeof(*in));
@@ -891,7 +890,7 @@ static int ReadFor(struct parser *parser)
 		if (strcmp(parser->word, "to") != 0) {
 			return -1;
 		}
-		if (ReadInstruction(parser, 0) < 0) {
+		if (ReadExpression(parser, 0) < 0) {
 			return -1;
 		}
 		to = union_Alloc(union_Default(), sizeof(*to));
@@ -902,7 +901,7 @@ static int ReadFor(struct parser *parser)
 		SkipSpace(parser);
 	}
 
-	if (_ReadInstruction(parser) < 0) {
+	if (ReadExpression(parser, 0) < 0) {
 		return -1;
 	}
 	iter = union_Alloc(union_Default(), sizeof(*iter));
@@ -937,7 +936,7 @@ static int ReadIf(struct parser *parser)
 	Instruction *cond;
 	Instruction *els = NULL;
 
-	if (ReadInstruction(parser, 0) < 0) {
+	if (ReadExpression(parser, 0) < 0) {
 		return -1;
 	}
 	cond = union_Alloc(union_Default(), sizeof(*cond));
@@ -947,7 +946,7 @@ static int ReadIf(struct parser *parser)
 	*cond = parser->instruction;
 
 	SkipSpace(parser);
-	if (_ReadInstruction(parser) < 0) {
+	if (ReadExpression(parser, 0) < 0) {
 		return -1;
 	}
 	iff = union_Alloc(union_Default(), sizeof(*iff));
@@ -961,7 +960,7 @@ static int ReadIf(struct parser *parser)
 				!isalnum(text[4]) && text[4] != '_') {
 			ReadWord(parser);
 			SkipSpace(parser);
-			if (_ReadInstruction(parser) < 0) {
+			if (ReadExpression(parser, 0) < 0) {
 				return -1;
 			}
 			els = union_Alloc(union_Default(),
@@ -990,7 +989,7 @@ static int ReadInvoke(struct parser *parser)
 	 */
 	strcpy(name, parser->word);
 	while (parser->c != ')') {
-		if (ReadInstruction(parser, 0) < 0) {
+		if (ReadExpression(parser, 0) < 0) {
 			return -1;
 		}
 		/* NOT parser->uni! */
@@ -1036,7 +1035,7 @@ static int ReadLocal(struct parser *parser)
 
 	/* save this because it will be overwritten */
 	const Instruction instruction = parser->instruction;
-	if (ReadInstruction(parser, 0) < 0) {
+	if (ReadExpression(parser, 0) < 0) {
 		return -1;
 	}
 	pInstr = union_Alloc(union_Default(), sizeof(*pInstr));
@@ -1054,7 +1053,7 @@ static int ReadReturn(struct parser *parser)
 {
 	Instruction *instr;
 
-	if (ReadInstruction(parser, 0) < 0) {
+	if (ReadExpression(parser, 0) < 0) {
 		return -1;
 	}
 	instr = union_Alloc(union_Default(), sizeof(*instr));
@@ -1088,7 +1087,7 @@ static int ReadWhile(struct parser *parser)
 	Instruction *cond;
 	Instruction *iter;
 
-	if (ReadInstruction(parser, 0) < 0) {
+	if (ReadExpression(parser, 0) < 0) {
 		return -1;
 	}
 	cond = union_Alloc(union_Default(), sizeof(*cond));
@@ -1098,7 +1097,7 @@ static int ReadWhile(struct parser *parser)
 	*cond = parser->instruction;
 
 	SkipSpace(parser);
-	if (ReadInstruction(parser, 0) < 0) {
+	if (ReadExpression(parser, 0) < 0) {
 		return -1;
 	}
 	iter = union_Alloc(union_Default(), sizeof(*iter));
@@ -1197,7 +1196,7 @@ static int ResolveConstant(struct parser *parser)
 	return -1;
 }
 
-static int _ReadInstruction(struct parser *parser)
+static int ReadExpression(struct parser *parser, int precedence)
 {
 	static const struct {
 		const char *word;
@@ -1213,101 +1212,6 @@ static int _ReadInstruction(struct parser *parser)
 		{ "while", ReadWhile },
 	};
 
-	if (parser->c == '{') {
-		if (ReadBody(parser) < 0) {
-			return -1;
-		}
-		parser->instruction.instr = INSTR_GROUP;
-		parser->instruction.group.instructions = parser->instructions;
-		parser->instruction.group.numInstructions =
-			parser->numInstructions;
-		return 0;
-	}
-
-	/* implicit array type */
-	if (parser->c == '[') {
-		if (ReadArray(parser) < 0) {
-			return -1;
-		}
-		parser->value.type = TYPE_ARRAY;
-		parser->instruction.instr = INSTR_VALUE;
-		parser->instruction.value.value.type = parser->value.type;
-		parser->instruction.value.value = parser->value;
-		return 0;
-	}
-
-	/* implicit string type */
-	if (parser->c == '\"') {
-		if (ReadString(parser) < 0) {
-			return -1;
-		}
-		parser->value.type = TYPE_STRING;
-		parser->instruction.instr = INSTR_VALUE;
-		parser->instruction.value.value.type = parser->value.type;
-		parser->instruction.value.value.s = parser->value.s;
-		return 0;
-	}
-
-	if (ReadWord(parser) < 0) {
-		struct int_or_float iof;
-
-		if (ReadIntOrFloat(parser, &iof) < 0) {
-			return -1;
-		}
-		iof_AsPrecise(&iof, &parser->value);
-		parser->instruction.instr = INSTR_VALUE;
-		parser->instruction.value.value = parser->value;
-		return 0;
-	}
-
-	const type_t type = CheckType(parser);
-	if (type != TYPE_NULL) {
-		SkipSpace(parser);
-		if (_ReadValue(parser, type) < 0) {
-			return -1;
-		}
-		parser->value.type = type;
-		parser->instruction.instr = INSTR_VALUE;
-		parser->instruction.value.value = parser->value;
-		return 0;
-	}
-
-	if (strcmp(parser->word, "const") == 0) {
-		SkipSpace(parser);
-		if (ReadWord(parser) < 0) {
-			return -1;
-		}
-		if (ResolveConstant(parser) < 0) {
-			return -1;
-		}
-		parser->instruction.instr = INSTR_VALUE;
-		parser->instruction.value.value = parser->value;
-		return 0;
-	}
-
-	/* only now do we skip space because the '.' operator is
-	 * not supposed to have any space between it and the previous word */
-	SkipSpace(parser);
-	for (size_t i = 0; i < ARRLEN(keywords); i++) {
-		if (strcmp(keywords[i].word, parser->word) == 0) {
-			return keywords[i].read(parser);
-		}
-	}
-
-	if (parser->c == '(') {
-		NextChar(parser); /* skip '(' */
-		SkipSpace(parser);
-		return ReadInvoke(parser);
-	}
-
-	/* assume a variable */
-	parser->instruction.instr = INSTR_VARIABLE;
-	strcpy(parser->instruction.variable.name, parser->word);
-	return 0;
-}
-
-static int ReadInstruction(struct parser *parser, int precedence)
-{
 	struct {
 		char ch;
 		const char *sys;
@@ -1342,20 +1246,19 @@ static int ReadInstruction(struct parser *parser, int precedence)
 	char lh;
 	Instruction opr;
 
-	instr.instr = INSTR_BREAK;
-next_prefix:
 	for (Uint32 i = 0; i < ARRLEN(prefixes); i++) {
 		if (prefixes[i].ch == parser->c) {
-			if (prefixes[i].sys == NULL) {
-				goto next_prefix;
-			}
 			NextChar(parser);
 			SkipSpace(parser);
-			if (ReadInstruction(parser,
+			if (ReadExpression(parser,
 						prefixes[i].precedence) < 0) {
 				return -1;
 			}
 			SkipSpace(parser);
+			if (prefixes[i].sys == NULL) {
+				instr = parser->instruction;
+				goto next_infix;
+			}
 			instr.instr = INSTR_INVOKESYS;
 			strcpy(instr.invoke.name, prefixes[i].sys);
 			instr.invoke.args = union_Alloc(union_Default(),
@@ -1365,14 +1268,25 @@ next_prefix:
 			}
 			instr.invoke.args[0] = parser->instruction;
 			instr.invoke.numArgs = 1;
-			break;
+			goto next_infix;
 		}
 	}
 
-	if (parser->c == '(') {
+	if (parser->c == '{') {
+		if (precedence != 0) {
+			return -1;
+		}
+		if (ReadBody(parser) < 0) {
+			return -1;
+		}
+		instr.instr = INSTR_GROUP;
+		instr.group.instructions = parser->instructions;
+		instr.group.numInstructions = parser->numInstructions;
+		return 0;
+	} else if (parser->c == '(') {
 		NextChar(parser); /* skip '(' */
 		SkipSpace(parser);
-		if (ReadInstruction(parser, 0) < 0) {
+		if (ReadExpression(parser, 0) < 0) {
 			return -1;
 		}
 		instr = parser->instruction;
@@ -1380,24 +1294,86 @@ next_prefix:
 			return -1;
 		}
 		NextChar(parser); /* skip ')' */
-		SkipSpace(parser);
-	}
-
-	if (instr.instr == INSTR_BREAK) {
-		if (_ReadInstruction(parser) < 0) {
+	} else if (parser->c == '[') {
+		if (ReadArray(parser) < 0) {
 			return -1;
 		}
-		instr = parser->instruction;
+		parser->value.type = TYPE_ARRAY;
+		instr.instr = INSTR_VALUE;
+		instr.value.value.type = parser->value.type;
+		instr.value.value = parser->value;
+	} else if (parser->c == '\"') {
+		if (ReadString(parser) < 0) {
+			return -1;
+		}
+		parser->value.type = TYPE_STRING;
+		instr.instr = INSTR_VALUE;
+		instr.value.value.type = parser->value.type;
+		instr.value.value.s = parser->value.s;
+	} else if (!isalpha(parser->c) && parser->c != '_') {
+		struct int_or_float iof;
+
+		if (ReadIntOrFloat(parser, &iof) < 0) {
+			return -1;
+		}
+		iof_AsPrecise(&iof, &parser->value);
+		instr.instr = INSTR_VALUE;
+		instr.value.value = parser->value;
+	} else if (ReadWord(parser) < 0) {
+		return -1;
+	} else {
 		SkipSpace(parser);
+
+		const type_t type = CheckType(parser);
+		if (type != TYPE_NULL) {
+			if (_ReadValue(parser, type) < 0) {
+				return -1;
+			}
+			parser->value.type = type;
+			instr.instr = INSTR_VALUE;
+			instr.value.value = parser->value;
+		} else if (strcmp(parser->word, "const") == 0) {
+			if (ReadWord(parser) < 0) {
+				return -1;
+			}
+			if (ResolveConstant(parser) < 0) {
+				return -1;
+			}
+			instr.instr = INSTR_VALUE;
+			instr.value.value = parser->value;
+		} else {
+			if (precedence == 0) {
+				for (size_t i = 0; i < ARRLEN(keywords); i++) {
+					if (strcmp(keywords[i].word,
+								parser->word) ==
+							0) {
+						return keywords[i].read(parser);
+					}
+				}
+			}
+
+			if (parser->c == '(') {
+				NextChar(parser); /* skip '(' */
+				SkipSpace(parser);
+				if (ReadInvoke(parser) < 0) {
+					return -1;
+				}
+				instr = parser->instruction;
+			} else {
+				instr.instr = INSTR_VARIABLE;
+				strcpy(instr.variable.name, parser->word);
+			}
+		}
 	}
 
+next_infix:
+	SkipSpace(parser);
 	if (LookAhead(parser, lhb, 2) != 2) {
 		lh = 0;
 	} else {
 		lh = lhb[1];
 	}
 
-next_infix:
 	for (Uint32 i = 0; i < ARRLEN(infixes); i++) {
 		if (infixes[i].ch != parser->c) {
 			continue;
@@ -1414,7 +1390,8 @@ next_infix:
 		}
 
 		/* these have special handles */
-		if (infixes[i].sys[0] == '=') {
+		switch (infixes[i].sys[0]) {
+		case '=':
 			if (instr.instr != INSTR_VARIABLE && instr.instr !=
 					INSTR_SUBVARIABLE) {
 				return -1;
@@ -1433,20 +1410,62 @@ next_infix:
 			}
 			NextChar(parser); /* skip '=' */
 			SkipSpace(parser);
-			if (ReadInstruction(parser, infixes[i].precedence) < 0) {
+			if (ReadExpression(parser, infixes[i].precedence) < 0) {
 				return -1;
 			}
 			*opr.set.src = parser->instruction;
 			instr = opr;
 			goto next_infix;
-		} else if (parser->c == '.') {
-			/* TODO: */
-			return -2;
+
+		case '.': {
+			char sub[MAX_WORD];
+			Instruction *from;
+
+			from = union_Alloc(union_Default(),
+					sizeof(*from));
+			if (from == NULL) {
+				return -1;
+			}
+			*from = instr;
+
+			NextChar(parser); /* skip '.' */
+			SkipSpace(parser);
+			if (ReadWord(parser) < 0) {
+				return -1;
+			}
+			strcpy(sub, parser->word);
+
+			SkipSpace(parser);
+			if (parser->c == '(') {
+				Instruction *args;
+				Uint32 numArgs;
+
+				NextChar(parser); /* skip '(' */
+				SkipSpace(parser);
+				if (ReadInvoke(parser) < 0) {
+					return -1;
+				}
+				args = parser->instruction.invoke.args;
+				numArgs = parser->instruction.invoke.numArgs;
+
+				opr.instr = INSTR_INVOKESUB;
+				opr.invokesub.from = from;
+				strcpy(opr.invokesub.sub, sub);
+				opr.invokesub.args = args;
+				opr.invokesub.numArgs = numArgs;
+			} else {
+				opr.instr = INSTR_SUBVARIABLE;
+				opr.subvariable.from = from;
+				strcpy(opr.subvariable.name, sub);
+			}
+			instr = opr;
+			goto next_infix;
+		}
 		}
 
 		NextChar(parser);
 		SkipSpace(parser);
-		if (ReadInstruction(parser, infixes[i].precedence) < 0) {
+		if (ReadExpression(parser, infixes[i].precedence) < 0) {
 			return -1;
 		}
 		opr.invoke.args = union_Alloc(union_Default(),
@@ -1468,10 +1487,10 @@ next_infix:
 
 static int ReadProperty(struct parser *parser)
 {
-	if (parser->c != '.') {
+	if (parser->c != ':') {
 		return -1;
 	}
-	NextChar(parser); /* skip '.' */
+	NextChar(parser); /* skip ':' */
 	if (ReadWord(parser) < 0) {
 		return -1;
 	}
@@ -1482,7 +1501,7 @@ static int ReadProperty(struct parser *parser)
 	}
 	NextChar(parser); /* skip '=' */
 	SkipSpace(parser);
-	if (ReadInstruction(parser, 0) < 0) {
+	if (ReadExpression(parser, 0) < 0) {
 		return -1;
 	}
 	parser->property.instruction = parser->instruction;
@@ -1541,7 +1560,7 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 	NextChar(&parser);
 
 	while (SkipSpace(&parser), parser.c != EOF) {
-		if (parser.c == '.') {
+		if (parser.c == ':') {
 			if (numWrappers == 1) {
 				goto fail;
 			}
@@ -1577,7 +1596,7 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 			strcpy(parser.property.name, parser.word);
 			NextChar(&parser); /* skip '=' */
 			SkipSpace(&parser);
-			if (ReadInstruction(&parser, 0) < 0) {
+			if (ReadExpression(&parser, 0) < 0) {
 				goto fail;
 			}
 			parser.property.instruction = parser.instruction;

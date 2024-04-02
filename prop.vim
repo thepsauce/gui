@@ -17,11 +17,15 @@ syn keyword PropertyKeywords for if else in from to local const return this trig
 
 hi link PropertyKeywords Statement
 
-syn match PropertyLabel "\h\k*\s*\ze:"
+syn match PropertyLabel "\h\k*\s*:"
 
 hi link PropertyLabel Label
 
-syn match PropertyVariable "\.\s*\h\k*"
+syn match PropertyInvoke "\<\h\k*\ze("
+
+hi link PropertyInvoke cFunction
+
+syn match PropertyVariable ":\s*\h\k*"
 
 syn match PropertyChar "'.'"
 syn match PropertySpecialChar "\v'\\([abefnrvt]|x[0-9a-fA-F][0-9a-fA-F])'"
@@ -54,11 +58,7 @@ hi link PropertyValueFloat Number
 
 hi link PropertyVariable cMember
 
-syn match PropertyInvoke "\<\h\k*\ze("
-
-hi link PropertyInvoke cFunction
-
-syn match PropertyOperators "[{}[\],()=:<>]"
+syn match PropertyOperators "[{}[\],.()=<>]"
 
 hi link PropertyOperators Operator
 
