@@ -1327,7 +1327,11 @@ static int SystemNot(Value *args, Uint32 numArgs, Value *result)
 
 static int SystemNotEquals(Value *args, Uint32 numArgs, Value *result)
 {
-	return !SystemEquals(args, numArgs, result);
+	if (SystemEquals(args, numArgs, result) < 0) {
+		return -1;
+	}
+	result->b = !result->b;
+	return 0;
 }
 
 static void PrintValue(Value *value, FILE *fp)
