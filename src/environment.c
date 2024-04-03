@@ -176,6 +176,50 @@ static int GetSubVariable(Value *value, const char *sub, Value *result)
 		case 'b':
 			result->i = value->i & 0xff;
 			break;
+		case 'h':
+		case 's':
+		case 'l': {
+			Uint8 ri, gi, bi;
+			double r, g, b, min, max;
+			double h, s, l;
+			double d;
+
+			ri = (value->i >> 16) & 0xff;
+			gi = (value->i >> 8) & 0xff;
+			bi = value->i & 0xff;
+
+			r = ri / 255.0;
+			g = gi / 255.0;
+			b = bi / 255.0;
+
+			min = MIN(MIN(r, g), b);
+			max = MAX(MAX(r, g), b);
+
+			l = (max + min) / 2.0;
+			if (sub[0] == 'l') {
+				result->i = l * 100;
+				break;
+			}
+
+			d = max - min;
+			s = l > 0.5 ? d / (2.0 - max - min) : d / (max + min);
+
+			if (sub[0] == 's') {
+				result->i = s * 100;
+				break;
+			}
+
+			if (max == r) {
+				h = (g - b) / d + (g < b ? 6.0 : 0.0);
+			} else if (max == g) {
+				h = (b - r) / d + 2.0;
+			} else {
+				h = (r - g) / d + 4.0;
+			}
+			h /= 6.0;
+			result->i = h * 360;
+			break;
+		}
 		default:
 			return -1;
 		}
@@ -836,13 +880,17 @@ static int SystemDup(Value *args, Uint32 numArgs, Value *result)
 			return -1;
 		}
 		arr->numValues = args[0].a->numValues;
-		arr->values = union_Alloc(environment.uni,
-				sizeof(*arr->values) * arr->numValues);
-		if (arr->values == NULL) {
-			return -1;
+		if (arr->numValues != 0) {
+			arr->values = union_Alloc(environment.uni,
+					sizeof(*arr->values) * arr->numValues);
+			if (arr->values == NULL) {
+				return -1;
+			}
+			memcpy(arr->values, args[0].a->values,
+					sizeof(*arr->values) * arr->numValues);
+		} else {
+			arr->values = NULL;
 		}
-		memcpy(arr->values, args[0].a->values,
-				sizeof(*arr->values) * arr->numValues);
 		result->type = TYPE_ARRAY;
 		result->a = arr;
 		break;
@@ -855,11 +903,15 @@ static int SystemDup(Value *args, Uint32 numArgs, Value *result)
 			return -1;
 		}
 		str->length = args[0].s->length;
-		str->data = union_Alloc(environment.uni, str->length);
-		if (str->data == NULL) {
-			return -1;
+		if (str->length != 0) {
+			str->data = union_Alloc(environment.uni, str->length);
+			if (str->data == NULL) {
+				return -1;
+			}
+			memcpy(str->data, args[0].s->data, str->length);
+		} else {
+			str->data = NULL;
 		}
-		memcpy(str->data, args[0].s->data, str->length);
 		result->type = TYPE_STRING;
 		result->s = str;
 		break;
@@ -1094,7 +1146,9 @@ static int SystemInsert(Value *args, Uint32 numArgs, Value *result)
 		Value *newValues;
 
 		arr = args[0].a;
-		if (!union_HasPointer(environment.uni, arr->values)) {
+		if (arr->values != NULL &&
+				!union_HasPointer(environment.uni,
+					arr->values)) {
 			return -1;
 		}
 		newValues = union_Realloc(environment.uni, arr->values,
@@ -1113,7 +1167,8 @@ static int SystemInsert(Value *args, Uint32 numArgs, Value *result)
 		char *newData;
 
 		str = args[0].s;
-		if (!union_HasPointer(environment.uni, str->data)) {
+		if (str->data != NULL &&
+				!union_HasPointer(environment.uni, str->data)) {
 			return -1;
 		}
 
@@ -1134,6 +1189,9 @@ static int SystemInsert(Value *args, Uint32 numArgs, Value *result)
 			}
 		}
 
+		if (count == 0) {
+			return 0;
+		}
 
 		newData = union_Realloc(environment.uni, str->data,
 				str->length + count);

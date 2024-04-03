@@ -355,6 +355,7 @@ static struct word *GetCachedWord(const char *data)
 static struct word *CacheWord(Renderer *renderer, const char *data)
 {
 	const Color white = { 255, 255, 255, 255 };
+	const Color black = { 0, 0, 0, 0 };
 
 	struct font *font;
 
@@ -375,7 +376,7 @@ static struct word *CacheWord(Renderer *renderer, const char *data)
 	}
 	font->cachedWords = newWords;
 
-	textSurface = TTF_RenderText_Solid(font->font, data, white);
+	textSurface = TTF_RenderUTF8_LCD(font->font, data, white, black);
 	if (textSurface == NULL) {
 		return NULL;
 	}
@@ -454,7 +455,7 @@ int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y)
 		}
 
 		end = text;
-		while (*end > ' ') {
+		while ((Uint8) *end > ' ') {
 			end++;
 		}
 
@@ -480,6 +481,7 @@ int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y)
 		textRect = (Rect) {
 			cx, cy, word->width, word->height
 		};
+		SDL_SetTextureColorMod(word->texture, r, g, b);
 		SDL_RenderCopy(renderer, word->texture, NULL, &textRect);
 		cx += word->width;
 		text = end;

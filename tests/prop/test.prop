@@ -74,9 +74,11 @@ Button::init = function {
 
 Button::draw = function {
 	SetFont(font)
-	SetDrawColor(color white)
-	DrawText("Hello there\nWhat is this?", 30, 30)
+	SetDrawColor(color green)
+	DrawText("Hello there\nWhat is this?\nおす\n", 30, 30)
 
+	SetDrawColor(color white)
+	SetDrawColor(color rgb (255))
 	DrawEllipse(80, 80, 30, 30)
 	FillEllipse(mouse.x, mouse.y, 30, 30)
 }

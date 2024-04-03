@@ -5,6 +5,8 @@ test = function {
 	if exists(a) {
 		print(name(a), " exists:\n")
 		print(a, "\n")
+	} else {
+		print(name(a), " does not exist\n")
 	}
 
 	print("Init\n")

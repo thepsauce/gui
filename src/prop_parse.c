@@ -514,6 +514,7 @@ static int ReadColor(struct parser *parser)
 			w++;
 		}
 		if (strcmp(w, "rgb") == 0) {
+			SkipSpace(parser);
 			if (ReadInts(parser, argb, ARRLEN(argb), &num) < 0) {
 				return -1;
 			}
