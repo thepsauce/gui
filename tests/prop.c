@@ -1,7 +1,18 @@
 #include "test.h"
 
+int HappyTrigger(const Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs != 1 || args[0].type != TYPE_STRING) {
+		return -1;
+	}
+	printf("triggered happy: %.*s\n", args[0].s->length, args[0].s->data);
+	(void) result;
+	return 0;
+}
+
 int main(void)
 {
+	struct trigger trigger;
 	FILE *fp;
 	Union uni;
 	RawWrapper *wrappers;
@@ -10,6 +21,10 @@ int main(void)
 	if (gui_Init(GUI_INIT_CLASSES) < 0) {
 		return 1;
 	}
+
+	strcpy(trigger.name, "happy");
+	trigger.trigger = HappyTrigger;
+	trigger_Install(&trigger);
 
 	fp = fopen("tests/prop/test.prop", "r");
 	if (prop_Parse(fp, &uni, &wrappers, &numWrappers) == 0) {

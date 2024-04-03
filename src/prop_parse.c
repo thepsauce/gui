@@ -442,50 +442,6 @@ static int ReadBool(struct parser *parser)
 	return -1;
 }
 
-/* Reads either a series of ints like:
- * (i1, i2, i3, ...)
- * or a series of floats like:
- * (f1, f2, f3, ...)
- */
-static int ReadValues(struct parser *parser, void *values, Uint32 maxNumInts,
-		Uint32 *pNumInts, type_t type)
-{
-	Uint32 i = 0;
-	Value v;
-
-	if (parser->c != '(') {
-		return -1;
-	}
-	NextChar(parser); /* skip '(' */
-	SkipSpace(parser);
-	while (parser->c != ')') {
-		if (i == maxNumInts) {
-			return -1;
-		}
-		if (ReadValue(parser) < 0) {
-			return -1;
-		}
-		SkipSpace(parser);
-		if (parser->c == ',') {
-			NextChar(parser); /* skip ',' */
-			SkipSpace(parser);
-		} else if (parser->c != ')') {
-			return -1;
-		}
-		if (value_Cast(&parser->value, type, &v) < 0) {
-			return -1;
-		}
-		if (type == TYPE_FLOAT) {
-			((float*) values)[i++] = v.f;
-		} else {
-			((Sint64*) values)[i++] = v.i;
-		}
-	}
-	NextChar(parser); /* skip ')' */
-	*pNumInts = i;
-	return 0;
-}
-
 static int ReadColor(struct parser *parser)
 {
 	static const struct {
@@ -510,118 +466,9 @@ static int ReadColor(struct parser *parser)
 		{ "navy", 0xff000080 }
 	};
 
-	float values[4];
-	Uint32 num;
-	char *w;
-
 	if (isalpha(parser->c)) {
 		if (ReadWord(parser) < 0) {
 			return -1;
-		}
-		w = parser->word;
-		if (w[0] == 'a') {
-			w++;
-		}
-		if (strcmp(w, "rgb") == 0) {
-			rgb_t rgb;
-
-			SkipSpace(parser);
-			if (ReadValues(parser, values, ARRLEN(values),
-						&num, TYPE_FLOAT) < 0) {
-				return -1;
-			}
-			rgb.alpha = 1.0f;
-			switch (num) {
-			case 0:
-				rgb.red = 0.0f;
-				rgb.green = 0.0f;
-				rgb.blue = 0.0f;
-				break;
-			case 1:
-				rgb.red = values[0];
-				rgb.green = values[0];
-				rgb.blue = values[0];
-				break;
-			case 3:
-				rgb.red = values[0];
-				rgb.green = values[1];
-				rgb.blue = values[2];
-				break;
-			case 4:
-				rgb.alpha = values[0];
-				rgb.red = values[1];
-				rgb.green = values[2];
-				rgb.blue = values[3];
-				break;
-			default:
-				return -1;
-			}
-			parser->value.c = rgb;
-			return 0;
-		} else if(strcmp(w, "hsl") == 0) {
-			hsl_t hsl;
-
-			SkipSpace(parser);
-			if (ReadValues(parser, values, ARRLEN(values),
-						&num, TYPE_FLOAT) < 0) {
-				return -1;
-			}
-
-			hsl.alpha = 1.0f;
-			switch (num) {
-			case 1:
-				hsl.hue = 0.0f;
-				hsl.saturation = 0.0f;
-				hsl.lightness = values[0];
-				break;
-			case 3:
-				hsl.hue = values[0];
-				hsl.saturation = values[1];
-				hsl.lightness = values[2];
-				break;
-			case 4:
-				hsl.alpha = values[0];
-				hsl.hue = values[1];
-				hsl.saturation = values[2];
-				hsl.lightness = values[3];
-				break;
-			default:
-				return -1;
-			}
-			HslToRgb(&hsl, &parser->value.c);
-			return 0;
-		} else if(strcmp(w, "hsv") == 0) {
-			hsv_t hsv;
-
-			SkipSpace(parser);
-			if (ReadValues(parser, values, ARRLEN(values),
-						&num, TYPE_FLOAT) < 0) {
-				return -1;
-			}
-
-			hsv.alpha = 1.0f;
-			switch (num) {
-			case 1:
-				hsv.hue = 0.0f;
-				hsv.saturation = 0.0f;
-				hsv.value = values[0];
-				break;
-			case 3:
-				hsv.hue = values[0];
-				hsv.saturation = values[1];
-				hsv.value = values[2];
-				break;
-			case 4:
-				hsv.alpha = values[0];
-				hsv.hue = values[1];
-				hsv.saturation = values[2];
-				hsv.value = values[3];
-				break;
-			default:
-				return -1;
-			}
-			HsvToRgb(&hsv, &parser->value.c);
-			return 0;
 		}
 		for (size_t i = 0; i < ARRLEN(colors); i++) {
 			if (strcmp(colors[i].name, parser->word) == 0) {
@@ -786,51 +633,6 @@ static int ReadInt(struct parser *parser)
 	}
 	parser->value.type = TYPE_INTEGER;
 	parser->value.i = iof_AsInt(&iof);
-	return 0;
-}
-
-static int ReadPoint(struct parser *parser)
-{
-	Sint64 nums[2];
-	Uint32 num;
-
-	if (ReadValues(parser, nums, ARRLEN(nums), &num, TYPE_INTEGER) < 0) {
-		return -1;
-	}
-	switch (num) {
-	case 0:
-		parser->value.p = (Point) { 0, 0 };
-		break;
-	case 2:
-		parser->value.p = (Point) { nums[0], nums[1] };
-		break;
-	default:
-		return -1;
-	}
-	return 0;
-}
-
-static int ReadRect(struct parser *parser)
-{
-	Sint64 nums[4];
-	Uint32 num;
-
-	if (ReadValues(parser, nums, ARRLEN(nums), &num, TYPE_INTEGER) < 0) {
-		return -1;
-	}
-	switch (num) {
-	case 0:
-		parser->value.r = (Rect) { 0, 0, 0, 0 };
-		break;
-	case 2:
-		parser->value.r = (Rect) { .w = nums[0], .h = nums[1] };
-		break;
-	case 4:
-		parser->value.r = (Rect) { nums[0], nums[1], nums[2], nums[3] };
-		break;
-	default:
-		return -1;
-	}
 	return 0;
 }
 
@@ -1150,11 +952,26 @@ static int ReadThis(struct parser *parser)
 
 static int ReadTrigger(struct parser *parser)
 {
+	Instruction *args;
+	Uint32 numArgs;
+
 	if (ReadWord(parser) < 0) {
 		return -1;
 	}
+	SkipSpace(parser);
+	if (parser->c == '(') {
+		NextChar(parser);
+		SkipSpace(parser);
+		if (ReadInvoke(parser) < 0) {
+			return -1;
+		}
+		args = parser->instruction.invoke.args;
+		numArgs = parser->instruction.invoke.numArgs;
+	}
 	parser->instruction.instr = INSTR_TRIGGER;
 	strcpy(parser->instruction.trigger.name, parser->word);
+	parser->instruction.trigger.args = args;
+	parser->instruction.trigger.numArgs = numArgs;
 	return 0;
 }
 
@@ -1198,8 +1015,8 @@ static int _ReadValue(struct parser *parser, type_t type)
 		[TYPE_FLOAT] = ReadFloat,
 		[TYPE_FUNCTION] = ReadFunction,
 		[TYPE_INTEGER] = ReadInt,
-		[TYPE_POINT] = ReadPoint,
-		[TYPE_RECT] = ReadRect,
+		[TYPE_POINT] = SkipSpace, /* these two have been replaced.. */
+		[TYPE_RECT] = SkipSpace, /* ..by system functions */
 		[TYPE_STRING] = ReadString,
 		[TYPE_SUCCESS] = SkipSpace, /* no specific read function */
 		[TYPE_VIEW] = ReadView
@@ -1272,22 +1089,32 @@ static int ResolveConstant(struct parser *parser)
 	return -1;
 }
 
+static const struct keyword {
+	const char *word;
+	int (*read)(struct parser *parser);
+} parser_keywords[] = {
+	{ "break", ReadBreak },
+	{ "for", ReadFor },
+	{ "if", ReadIf },
+	{ "local", ReadLocal },
+	{ "return", ReadReturn },
+	{ "this", ReadThis },
+	{ "trigger", ReadTrigger },
+	{ "while", ReadWhile },
+};
+
+const struct keyword *GetKeyword(const char *word)
+{
+	for (Uint32 i = 0; i < ARRLEN(parser_keywords); i++) {
+		if (strcmp(parser_keywords[i].word, word) == 0) {
+			return &parser_keywords[i];
+		}
+	}
+	return NULL;
+}
+
 static int ReadExpression(struct parser *parser, int precedence)
 {
-	static const struct {
-		const char *word;
-		int (*read)(struct parser *parser);
-	} keywords[] = {
-		{ "break", ReadBreak },
-		{ "for", ReadFor },
-		{ "if", ReadIf },
-		{ "local", ReadLocal },
-		{ "return", ReadReturn },
-		{ "this", ReadThis },
-		{ "trigger", ReadTrigger },
-		{ "while", ReadWhile },
-	};
-
 	struct {
 		char ch;
 		const char *sys;
@@ -1410,10 +1237,21 @@ static int ReadExpression(struct parser *parser, int precedence)
 	} else if (ReadWord(parser) < 0) {
 		return -1;
 	} else {
+		const struct keyword *keyword;
+		type_t type;
+
 		SkipSpace(parser);
 
-		const type_t type = CheckType(parser);
-		if (type != TYPE_NULL) {
+		if ((keyword = GetKeyword(parser->word)) != NULL) {
+			return keyword->read(parser);
+		} else if (parser->c == '(') {
+			NextChar(parser); /* skip '(' */
+			SkipSpace(parser);
+			if (ReadInvoke(parser) < 0) {
+				return -1;
+			}
+			instr = parser->instruction;
+		} else if ((type = CheckType(parser)) != TYPE_NULL) {
 			if (_ReadValue(parser, type) < 0) {
 				return -1;
 			}
@@ -1430,29 +1268,8 @@ static int ReadExpression(struct parser *parser, int precedence)
 			instr.instr = INSTR_VALUE;
 			instr.value.value = parser->value;
 		} else {
-			if (precedence == 0) {
-				for (size_t i = 0; i < ARRLEN(keywords); i++) {
-					if (strcmp(keywords[i].word,
-								parser->word) ==
-							0) {
-						/* there can't be any operators
-						 * after a keyword */
-						return keywords[i].read(parser);
-					}
-				}
-			}
-
-			if (parser->c == '(') {
-				NextChar(parser); /* skip '(' */
-				SkipSpace(parser);
-				if (ReadInvoke(parser) < 0) {
-					return -1;
-				}
-				instr = parser->instruction;
-			} else {
-				instr.instr = INSTR_VARIABLE;
-				strcpy(instr.variable.name, parser->word);
-			}
+			instr.instr = INSTR_VARIABLE;
+			strcpy(instr.variable.name, parser->word);
 		}
 	}
 
@@ -1684,6 +1501,9 @@ int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
 
 		if (ReadWord(&parser) < 0) {
 			goto fail;
+		}
+		if (GetKeyword(parser.word) != NULL) {
+			return -1;
 		}
 		SkipSpace(&parser);
 		if (parser.c == ':') {

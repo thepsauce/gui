@@ -57,6 +57,8 @@ main = function {
 	local b = CreateView("Button", 10, 10, 80, 30)
 	SetParent(b, DefaultView())
 
+	trigger happy("Hey")
+
 	return 0
 }
 
@@ -66,7 +68,7 @@ stylistic choice, it reminds of C++ ;
 
 Button::font = int 0
 Button::fontSize = int 16
-Button::mouse = point ()
+Button::mouse = point()
 
 Button::init = function {
 	font = CreateFont("FiraCode-Regular.ttf", fontSize)
@@ -77,7 +79,7 @@ Button::draw = function {
 	SetDrawColor(color green)
 	DrawText("Hello there\nWhat is this?\nおす\n", 30, 30)
 
-	SetDrawColor(color hsl (200, 1, 0.4))
+	SetDrawColor(hsl(200, 1, 0.4))
 	DrawEllipse(80, 80, 30, 30)
 	FillEllipse(mouse.x, mouse.y, 30, 30)
 }

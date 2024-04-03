@@ -35,6 +35,13 @@ typedef SDL_Renderer Renderer;
 typedef SDL_Rect Rect;
 typedef SDL_Point Point;
 
+#define GUI_INIT_CLASSES 0x01
+
+int gui_Init(Uint32 flags);
+Sint32 gui_GetWindowWidth(void);
+Sint32 gui_GetWindowHeight(void);
+int gui_Run(void);
+
 typedef struct {
 	float alpha;
 	float red;
@@ -64,13 +71,6 @@ void HsvToRgb(const hsv_t *hsv, rgb_t *rgb);
 void HsvToHsl(const hsv_t *hsv, hsl_t *hsl);
 void HslToHsv(const hsl_t *hsl, hsv_t *hsv);
 void HslToRgb(const hsl_t *hsl, rgb_t *rgb);
-
-#define GUI_INIT_CLASSES 0x01
-
-int gui_Init(Uint32 flags);
-Sint32 gui_GetWindowWidth(void);
-Sint32 gui_GetWindowHeight(void);
-int gui_Run(void);
 
 Renderer *renderer_Default(void);
 int renderer_SetDrawColor(Renderer *renderer, Uint32 color);
@@ -375,6 +375,8 @@ struct instr_set {
 
 struct instr_trigger {
 	char name[MAX_WORD];
+	struct instruction *args;
+	Uint32 numArgs;
 };
 
 struct instr_value {
@@ -416,6 +418,14 @@ typedef struct instruction {
 		struct instr_while whilee;
 	};
 } Instruction;
+
+struct trigger {
+	char name[256];
+	int (*trigger)(const Value *args, Uint32 numArgs, Value *result);
+};
+
+int trigger_Install(const struct trigger *trigger);
+struct trigger *trigger_Get(const char *word);
 
 typedef struct raw_property {
 	char name[MAX_WORD];

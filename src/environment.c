@@ -15,6 +15,37 @@ static struct environment {
 	.label = &global_label
 };
 
+struct trigger *installed_triggers;
+Uint32 num_installed_triggers;
+
+int trigger_Install(const struct trigger *trigger)
+{
+	struct trigger *newTriggers;
+
+	/* let them seg fault if trigger is null */
+	if (trigger->trigger == NULL) {
+		return -1;
+	}
+	newTriggers = union_Realloc(union_Default(), installed_triggers,
+			sizeof(*installed_triggers) * (num_installed_triggers + 1));
+	if (newTriggers == NULL) {
+		return -1;
+	}
+	installed_triggers = newTriggers;
+	installed_triggers[num_installed_triggers++] = *trigger;
+	return 0;
+}
+
+struct trigger *trigger_Get(const char *name)
+{
+	for (Uint32 i = 0; i < num_installed_triggers; i++) {
+		if (strcmp(name, installed_triggers[i].name) == 0) {
+			return &installed_triggers[i];
+		}
+	}
+	return NULL;
+}
+
 static int ExecuteSystem(const char *call,
 		Instruction *args, Uint32 numArgs, Value *result);
 int function_Execute(Function *func,
@@ -471,10 +502,10 @@ static int EvaluateInstruction(Instruction *instr, Value *result)
 	case INSTR_IF:
 	case INSTR_LOCAL:
 	case INSTR_RETURN:
-	case INSTR_TRIGGER:
 	case INSTR_WHILE:
 		return -1;
 	case INSTR_SET:
+	case INSTR_TRIGGER:
 		return ExecuteInstruction(instr, result);
 	case INSTR_INVOKE:
 		var = SearchVariable(instr->invoke.name, NULL);
@@ -740,13 +771,27 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 		}
 		break;
 
-	case INSTR_TRIGGER:
-		/* TODO: make trigger system */
+	case INSTR_TRIGGER: {
+		struct trigger *trigger;
+
 		/* triggers are just system functions but defined
 		 * by the user in C and installed using
 		 * trigger_Install(name, triggerFunc) */
-		printf("triggering: %s\n", instr->trigger.name);
+		trigger = trigger_Get(instr->trigger.name);
+		if (trigger == NULL) {
+			return -1;
+		}
+		Value values[instr->trigger.numArgs];
+		for (Uint32 i = 0; i < instr->trigger.numArgs; i++) {
+			if (EvaluateInstruction(&instr->trigger.args[i],
+						&values[i]) < 0) {
+				return -1;
+			}
+		}
+		trigger->trigger(values, instr->trigger.numArgs, result);
 		break;
+	}
+
 	case INSTR_INVOKE:
 		var = SearchVariable(instr->invoke.name, NULL);
 		if (var == NULL || var->value.type != TYPE_FUNCTION) {
@@ -761,6 +806,7 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 			return -1;
 		}
 		break;
+
 	case INSTR_WHILE:
 		b = true;
 		while (b) {
@@ -800,7 +846,7 @@ static int ExecuteInstructions(Instruction *instrs,
 	return 0;
 }
 
-static int SystemAnd(Value *args, Uint32 numArgs, Value *result)
+static int SystemAnd(const Value *args, Uint32 numArgs, Value *result)
 {
 	result->type = TYPE_BOOL;
 	result->b = true;
@@ -821,7 +867,7 @@ static int SystemAnd(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemDiv(Value *args, Uint32 numArgs, Value *result)
+static int SystemDiv(const Value *args, Uint32 numArgs, Value *result)
 {
 	Value val;
 
@@ -847,7 +893,7 @@ static int SystemDiv(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemDup(Value *args, Uint32 numArgs, Value *result)
+static int SystemDup(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 1) {
 		return -1;
@@ -903,7 +949,7 @@ static int SystemDup(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static bool Equals(Value *v1, Value *v2)
+static bool Equals(const Value *v1, const Value *v2)
 {
 	switch (v1->type) {
 	case TYPE_NULL:
@@ -978,7 +1024,7 @@ static bool Equals(Value *v1, Value *v2)
 	return true;
 }
 
-static int SystemEquals(Value *args, Uint32 numArgs, Value *result)
+static int SystemEquals(const Value *args, Uint32 numArgs, Value *result)
 {
 	result->type = TYPE_BOOL;
 	result->b = true;
@@ -997,7 +1043,7 @@ static int SystemEquals(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemExists(Value *args, Uint32 numArgs, Value *result)
+static int SystemExists(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 1 || args[0].type != TYPE_SUCCESS) {
 		return -1;
@@ -1007,7 +1053,7 @@ static int SystemExists(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemFile(Value *args, Uint32 numArgs, Value *result)
+static int SystemFile(const Value *args, Uint32 numArgs, Value *result)
 {
 	FILE *fp;
 	long pos;
@@ -1047,7 +1093,15 @@ static int SystemFile(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemGet(Value *args, Uint32 numArgs, Value *result)
+static int SystemFloat(const Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs != 1) {
+		return -1;
+	}
+	return value_Cast(&args[0], TYPE_FLOAT, result);
+}
+
+static int SystemGet(const Value *args, Uint32 numArgs, Value *result)
 {
 	Value val;
 
@@ -1074,7 +1128,7 @@ static int SystemGet(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int Compare(Value *v1, Value *v2)
+static int Compare(const Value *v1, const Value *v2)
 {
 	Value av1, av2;
 
@@ -1097,7 +1151,7 @@ static int Compare(Value *v1, Value *v2)
 	}
 }
 
-static int SystemGeq(Value *args, Uint32 numArgs, Value *result)
+static int SystemGeq(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 2) {
 		return -1;
@@ -1107,7 +1161,7 @@ static int SystemGeq(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemGtr(Value *args, Uint32 numArgs, Value *result)
+static int SystemGtr(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 2) {
 		return -1;
@@ -1117,7 +1171,102 @@ static int SystemGtr(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemInsert(Value *args, Uint32 numArgs, Value *result)
+static int args_GetFloats4(const Value *args, Uint32 numArgs, float *values)
+{
+	Uint32 numFloats = 0;
+	Value val;
+
+	if (numArgs == 2 || numArgs > 4) {
+		return -1;
+	}
+	for (Uint32 i = 0; i < numArgs; i++) {
+		if (value_Cast(&args[i], TYPE_FLOAT, &val) < 0) {
+			return -1;
+		}
+		values[numFloats++] = val.f;
+	}
+	return 0;
+}
+
+static int SystemHsl(const Value *args, Uint32 numArgs, Value *result)
+{
+	hsl_t hsl;
+	float values[4];
+
+	if (args_GetFloats4(args, numArgs, values) < 0) {
+		return -1;
+	}
+
+	hsl.alpha = 1.0f;
+	switch (numArgs) {
+	case 0:
+		hsl.hue = 0.0f;
+		hsl.saturation = 0.0f;
+		hsl.lightness = 0.0f;
+		break;
+	case 1:
+		hsl.hue = 0.0f;
+		hsl.saturation = 0.0f;
+		hsl.lightness = values[0];
+		break;
+	case 3:
+		hsl.hue = values[0];
+		hsl.saturation = values[1];
+		hsl.lightness = values[2];
+		break;
+	case 4:
+		hsl.alpha = values[0];
+		hsl.hue = values[1];
+		hsl.saturation = values[2];
+		hsl.lightness = values[3];
+		break;
+	}
+
+	result->type = TYPE_COLOR;
+	HslToRgb(&hsl, &result->c);
+	return 0;
+}
+
+static int SystemHsv(const Value *args, Uint32 numArgs, Value *result)
+{
+	hsv_t hsv;
+	float values[4];
+
+	if (args_GetFloats4(args, numArgs, values) < 0) {
+		return -1;
+	}
+
+	hsv.alpha = 1.0f;
+	switch (numArgs) {
+	case 0:
+		hsv.hue = 0.0f;
+		hsv.saturation = 0.0f;
+		hsv.value = 0.0f;
+		break;
+	case 1:
+		hsv.hue = 0.0f;
+		hsv.saturation = 0.0f;
+		hsv.value = values[0];
+		break;
+	case 3:
+		hsv.hue = values[0];
+		hsv.saturation = values[1];
+		hsv.value = values[2];
+		break;
+	case 4:
+		hsv.alpha = values[0];
+		hsv.hue = values[1];
+		hsv.saturation = values[2];
+		hsv.value = values[3];
+		break;
+	}
+
+	result->type = TYPE_COLOR;
+	HsvToRgb(&hsv, &result->c);
+	return 0;
+}
+
+static int SystemInsert(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs < 2) {
 		return -1;
@@ -1207,7 +1356,15 @@ static int SystemInsert(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemLength(Value *args, Uint32 numArgs, Value *result)
+static int SystemInt(const Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs != 1) {
+		return -1;
+	}
+	return value_Cast(&args[0], TYPE_INTEGER, result);
+}
+
+static int SystemLength(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 1) {
 		return -1;
@@ -1223,7 +1380,7 @@ static int SystemLength(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemLeq(Value *args, Uint32 numArgs, Value *result)
+static int SystemLeq(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 2) {
 		return -1;
@@ -1233,7 +1390,7 @@ static int SystemLeq(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemLss(Value *args, Uint32 numArgs, Value *result)
+static int SystemLss(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 2) {
 		return -1;
@@ -1243,7 +1400,7 @@ static int SystemLss(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemMod(Value *args, Uint32 numArgs, Value *result)
+static int SystemMod(const Value *args, Uint32 numArgs, Value *result)
 {
 	Value v1, v2;
 
@@ -1271,7 +1428,7 @@ static int SystemMod(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemMul(Value *args, Uint32 numArgs, Value *result)
+static int SystemMul(const Value *args, Uint32 numArgs, Value *result)
 {
 	Value val;
 
@@ -1297,7 +1454,7 @@ static int SystemMul(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemName(Value *args, Uint32 numArgs, Value *result)
+static int SystemName(const Value *args, Uint32 numArgs, Value *result)
 {
 	struct value_string *s;
 	Uint32 len;
@@ -1327,7 +1484,7 @@ static int SystemName(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemOr(Value *args, Uint32 numArgs, Value *result)
+static int SystemOr(const Value *args, Uint32 numArgs, Value *result)
 {
 	result->type = TYPE_BOOL;
 	result->b = false;
@@ -1348,7 +1505,72 @@ static int SystemOr(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemNot(Value *args, Uint32 numArgs, Value *result)
+static int args_GetPoint(const Value *args, Uint32 numArgs, Point *p)
+{
+	Value v;
+
+	if (numArgs == 2) {
+		Sint32 nums[2];
+
+		for (Uint32 i = 0; i < numArgs; i++) {
+			if (value_Cast(&args[i], TYPE_INTEGER, &v) < 0) {
+				return -1;
+			}
+			nums[i] = v.i;
+		}
+		*p = (Point) { nums[0], nums[1] };
+	} else if (numArgs == 1) {
+		if (args[0].type != TYPE_POINT) {
+			return -1;
+		}
+		*p = args[0].p;
+	} else {
+		return -1;
+	}
+	return 0;
+}
+
+static int args_GetRect(const Value *args, Uint32 numArgs, Rect *r)
+{
+	Value v;
+
+	if (numArgs == 4) {
+		Sint32 nums[4];
+
+		for (Uint32 i = 0; i < numArgs; i++) {
+			if (value_Cast(&args[i], TYPE_INTEGER, &v) < 0) {
+				return -1;
+			}
+			nums[i] = v.i;
+		}
+		*r = (Rect) { nums[0], nums[1], nums[2], nums[3] };
+	} else if (numArgs == 1) {
+		if (args[0].type != TYPE_RECT) {
+			return -1;
+		}
+		*r = args[0].r;
+	} else {
+		return -1;
+	}
+	return 0;
+}
+
+static int SystemPoint(const Value *args, Uint32 numArgs, Value *result)
+{
+	Point p;
+
+	if (numArgs == 0) {
+		p.x = 0;
+		p.y = 0;
+	} else if (args_GetPoint(args, numArgs, &p) < 0) {
+		return -1;
+	}
+	result->type = TYPE_POINT;
+	result->p = p;
+	return 0;
+}
+
+static int SystemNot(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 1) {
 		return -1;
@@ -1364,7 +1586,7 @@ static int SystemNot(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemNotEquals(Value *args, Uint32 numArgs, Value *result)
+static int SystemNotEquals(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (SystemEquals(args, numArgs, result) < 0) {
 		return -1;
@@ -1373,7 +1595,7 @@ static int SystemNotEquals(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static void PrintValue(Value *value, FILE *fp)
+static void PrintValue(const Value *value, FILE *fp)
 {
 	switch (value->type) {
 	case TYPE_NULL:
@@ -1435,7 +1657,7 @@ static void PrintValue(Value *value, FILE *fp)
 	}
 }
 
-static int SystemPrint(Value *args, Uint32 numArgs, Value *result)
+static int SystemPrint(const Value *args, Uint32 numArgs, Value *result)
 {
 	FILE *const fp = stdout;
 	for (Uint32 i = 0; i < numArgs; i++) {
@@ -1445,7 +1667,24 @@ static int SystemPrint(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemSum(Value *args, Uint32 numArgs, Value *result)
+static int SystemRect(const Value *args, Uint32 numArgs, Value *result)
+{
+	Rect r;
+
+	if (numArgs == 0) {
+		r.x = 0;
+		r.y = 0;
+		r.w = 0;
+		r.h = 0;
+	} else if (args_GetRect(args, numArgs, &r) < 0) {
+		return -1;
+	}
+	result->type = TYPE_RECT;
+	result->r = r;
+	return 0;
+}
+
+static int SystemSum(const Value *args, Uint32 numArgs, Value *result)
 {
 	Value val;
 
@@ -1471,7 +1710,7 @@ static int SystemSum(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemRand(Value *args, Uint32 numArgs, Value *result)
+static int SystemRand(const Value *args, Uint32 numArgs, Value *result)
 {
 	Value val;
 	Sint64 nums[2];
@@ -1498,7 +1737,46 @@ static int SystemRand(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemContains(Value *args, Uint32 numArgs, Value *result)
+static int SystemRgb(const Value *args, Uint32 numArgs, Value *result)
+{
+	rgb_t rgb;
+	float values[4];
+
+	if (args_GetFloats4(args, numArgs, values) < 0) {
+		return -1;
+	}
+
+	rgb.alpha = 1.0f;
+	switch (numArgs) {
+	case 0:
+		rgb.red = 0.0f;
+		rgb.green = 0.0f;
+		rgb.blue = 0.0f;
+		break;
+	case 1:
+		rgb.red = 0.0f;
+		rgb.green = 0.0f;
+		rgb.blue = values[0];
+		break;
+	case 3:
+		rgb.red = values[0];
+		rgb.green = values[1];
+		rgb.blue = values[2];
+		break;
+	case 4:
+		rgb.alpha = values[0];
+		rgb.red = values[1];
+		rgb.green = values[2];
+		rgb.blue = values[3];
+		break;
+	}
+
+	result->type = TYPE_COLOR;
+	result->c = rgb;
+	return 0;
+}
+
+static int SystemContains(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 2) {
 		return -1;
@@ -1511,57 +1789,7 @@ static int SystemContains(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int args_GetPoint(Value *args, Uint32 numArgs, Point *p)
-{
-	Value v;
-
-	if (numArgs == 2) {
-		Sint32 nums[2];
-
-		for (Uint32 i = 0; i < numArgs; i++) {
-			if (value_Cast(&args[i], TYPE_INTEGER, &v) < 0) {
-				return -1;
-			}
-			nums[i] = v.i;
-		}
-		*p = (Point) { nums[0], nums[1] };
-	} else if (numArgs == 1) {
-		if (args[0].type != TYPE_POINT) {
-			return -1;
-		}
-		*p = args[0].p;
-	} else {
-		return -1;
-	}
-	return 0;
-}
-
-static int args_GetRect(Value *args, Uint32 numArgs, Rect *r)
-{
-	Value v;
-
-	if (numArgs == 4) {
-		Sint32 nums[4];
-
-		for (Uint32 i = 0; i < numArgs; i++) {
-			if (value_Cast(&args[i], TYPE_INTEGER, &v) < 0) {
-				return -1;
-			}
-			nums[i] = v.i;
-		}
-		*r = (Rect) { nums[0], nums[1], nums[2], nums[3] };
-	} else if (numArgs == 1) {
-		if (args[0].type != TYPE_RECT) {
-			return -1;
-		}
-		*r = args[0].r;
-	} else {
-		return -1;
-	}
-	return 0;
-}
-
-static int SystemCreateView(Value *args, Uint32 numArgs, Value *result)
+static int SystemCreateView(const Value *args, Uint32 numArgs, Value *result)
 {
 	Rect r;
 	char *class;
@@ -1593,7 +1821,7 @@ static int SystemCreateView(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemDefaultView(Value *args, Uint32 numArgs, Value *result)
+static int SystemDefaultView(const Value *args, Uint32 numArgs, Value *result)
 {
 	(void) args;
 	if (numArgs != 0) {
@@ -1604,7 +1832,7 @@ static int SystemDefaultView(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemDrawEllipse(Value *args, Uint32 numArgs, Value *result)
+static int SystemDrawEllipse(const Value *args, Uint32 numArgs, Value *result)
 {
 	Rect r;
 
@@ -1616,7 +1844,7 @@ static int SystemDrawEllipse(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemDrawRect(Value *args, Uint32 numArgs, Value *result)
+static int SystemDrawRect(const Value *args, Uint32 numArgs, Value *result)
 {
 	Rect r;
 
@@ -1628,7 +1856,7 @@ static int SystemDrawRect(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemCreateFont(Value *args, Uint32 numArgs, Value *result)
+static int SystemCreateFont(const Value *args, Uint32 numArgs, Value *result)
 {
 	char *name;
 	Value size;
@@ -1652,7 +1880,7 @@ static int SystemCreateFont(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemDrawText(Value *args, Uint32 numArgs, Value *result)
+static int SystemDrawText(const Value *args, Uint32 numArgs, Value *result)
 {
 	Point p;
 
@@ -1672,7 +1900,7 @@ static int SystemDrawText(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemGetParent(Value *args, Uint32 numArgs, Value *result)
+static int SystemGetParent(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 1 || args[0].type != TYPE_VIEW) {
 		return -1;
@@ -1682,7 +1910,7 @@ static int SystemGetParent(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemSetDrawColor(Value *args, Uint32 numArgs, Value *result)
+static int SystemSetDrawColor(const Value *args, Uint32 numArgs, Value *result)
 {
 	Value value;
 
@@ -1700,7 +1928,7 @@ static int SystemSetDrawColor(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemSetFont(Value *args, Uint32 numArgs, Value *result)
+static int SystemSetFont(const Value *args, Uint32 numArgs, Value *result)
 {
 	Value index;
 
@@ -1717,7 +1945,7 @@ static int SystemSetFont(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemSetParent(Value *args, Uint32 numArgs, Value *result)
+static int SystemSetParent(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 2 || args[0].type != TYPE_VIEW ||
 			args[1].type != TYPE_VIEW) {
@@ -1728,7 +1956,7 @@ static int SystemSetParent(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemGetProperty(Value *args, Uint32 numArgs, Value *result)
+static int SystemGetProperty(const Value *args, Uint32 numArgs, Value *result)
 {
 	View *view;
 	char *str;
@@ -1750,7 +1978,7 @@ static int SystemGetProperty(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemSetProperty(Value *args, Uint32 numArgs, Value *result)
+static int SystemSetProperty(const Value *args, Uint32 numArgs, Value *result)
 {
 	View *view;
 	char *str;
@@ -1777,7 +2005,7 @@ static int SystemSetProperty(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemFillEllipse(Value *args, Uint32 numArgs, Value *result)
+static int SystemFillEllipse(const Value *args, Uint32 numArgs, Value *result)
 {
 	Rect r;
 
@@ -1789,7 +2017,7 @@ static int SystemFillEllipse(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemFillRect(Value *args, Uint32 numArgs, Value *result)
+static int SystemFillRect(const Value *args, Uint32 numArgs, Value *result)
 {
 	Rect r;
 
@@ -1801,7 +2029,7 @@ static int SystemFillRect(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemGetRect(Value *args, Uint32 numArgs, Value *result)
+static int SystemGetRect(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 1 || args[0].type != TYPE_VIEW) {
 		return -1;
@@ -1812,7 +2040,7 @@ static int SystemGetRect(Value *args, Uint32 numArgs, Value *result)
 }
 
 
-static int SystemSetRect(Value *args, Uint32 numArgs, Value *result)
+static int SystemSetRect(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs == 0 || args[0].type != TYPE_VIEW) {
 		return -1;
@@ -1824,7 +2052,7 @@ static int SystemSetRect(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemGetWindowWidth(Value *args, Uint32 numArgs, Value *result)
+static int SystemGetWindowWidth(const Value *args, Uint32 numArgs, Value *result)
 {
 	(void) args;
 	if (numArgs != 0) {
@@ -1835,7 +2063,7 @@ static int SystemGetWindowWidth(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemGetWindowHeight(Value *args, Uint32 numArgs, Value *result)
+static int SystemGetWindowHeight(const Value *args, Uint32 numArgs, Value *result)
 {
 	(void) args;
 	if (numArgs != 0) {
@@ -1846,7 +2074,7 @@ static int SystemGetWindowHeight(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemGetType(Value *args, Uint32 numArgs, Value *result)
+static int SystemGetType(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 1 || args[0].type != TYPE_EVENT) {
 		return -1;
@@ -1856,9 +2084,9 @@ static int SystemGetType(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemGetPos(Value *args, Uint32 numArgs, Value *result)
+static int SystemGetPos(const Value *args, Uint32 numArgs, Value *result)
 {
-	EventInfo *info;
+	const EventInfo *info;
 
 	if (numArgs != 1 || args[0].type != TYPE_EVENT) {
 		return -1;
@@ -1870,7 +2098,7 @@ static int SystemGetPos(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemGetButton(Value *args, Uint32 numArgs, Value *result)
+static int SystemGetButton(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 1 || args[0].type != TYPE_EVENT) {
 		return -1;
@@ -1880,7 +2108,7 @@ static int SystemGetButton(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemGetFontSize(Value *args, Uint32 numArgs, Value *result)
+static int SystemGetFontSize(const Value *args, Uint32 numArgs, Value *result)
 {
 	Font *font;
 
@@ -1893,7 +2121,7 @@ static int SystemGetFontSize(Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static int SystemGetWheel(Value *args, Uint32 numArgs, Value *result)
+static int SystemGetWheel(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 1 || args[0].type != TYPE_EVENT) {
 		return -1;
@@ -1908,19 +2136,22 @@ static int ExecuteSystem(const char *call,
 {
 	static const struct system_function {
 		const char *name;
-		int (*call)(Value *args, Uint32 numArgs, Value *result);
+		int (*call)(const Value *args, Uint32 numArgs, Value *result);
 	} functions[] = {
-		/* TODO: add more system functions */
 		{ "and", SystemAnd },
 		{ "div", SystemDiv },
 		{ "dup", SystemDup },
 		{ "equals", SystemEquals },
 		{ "exists", SystemExists },
 		{ "file", SystemFile },
+		{ "float", SystemFloat },
 		{ "get", SystemGet },
 		{ "geq", SystemGeq },
 		{ "gtr", SystemGtr },
+		{ "hsl", SystemHsl },
+		{ "hsv", SystemHsv },
 		{ "insert", SystemInsert },
+		{ "int", SystemInt },
 		{ "length", SystemLength },
 		{ "leq", SystemLeq },
 		{ "lss", SystemLss },
@@ -1930,8 +2161,11 @@ static int ExecuteSystem(const char *call,
 		{ "not", SystemNot },
 		{ "notequals", SystemNotEquals },
 		{ "or", SystemOr },
+		{ "point", SystemPoint },
 		{ "print", SystemPrint },
 		{ "rand", SystemRand },
+		{ "rect", SystemRect },
+		{ "rgb", SystemRgb },
 		{ "sum", SystemSum },
 
 		{ "Contains", SystemContains },
