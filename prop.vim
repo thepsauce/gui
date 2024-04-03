@@ -40,7 +40,7 @@ hi link PropertyString String
 hi link PropertyStringChar SpecialChar
 
 syn keyword PropertyValueTypes array bool color function int float string
-syn keyword PropertyValueSpecialTypes event point rect view rgb
+syn keyword PropertyValueSpecialTypes event point rect view rgb hsl
 syn keyword PropertyValueKeywords default black white red green blue yellow cyan magenta gray orange purple brown pink olive teal navy false true
 
 syn match PropertyValueFloat "\v\.[0-9]+([Ee][+-]?[0-9]+)?"

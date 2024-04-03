@@ -442,8 +442,13 @@ static int ReadBool(struct parser *parser)
 	return -1;
 }
 
-static int ReadInts(struct parser *parser, Sint64 *ints, Uint32 maxNumInts,
-		Uint32 *pNumInts)
+/* Reads either a series of ints like:
+ * (i1, i2, i3, ...)
+ * or a series of floats like:
+ * (f1, f2, f3, ...)
+ */
+static int ReadValues(struct parser *parser, void *values, Uint32 maxNumInts,
+		Uint32 *pNumInts, type_t type)
 {
 	Uint32 i = 0;
 	Value v;
@@ -467,10 +472,14 @@ static int ReadInts(struct parser *parser, Sint64 *ints, Uint32 maxNumInts,
 		} else if (parser->c != ')') {
 			return -1;
 		}
-		if (value_Cast(&parser->value, TYPE_INTEGER, &v) < 0) {
+		if (value_Cast(&parser->value, type, &v) < 0) {
 			return -1;
 		}
-		ints[i++] = v.i;
+		if (type == TYPE_FLOAT) {
+			((float*) values)[i++] = v.f;
+		} else {
+			((Sint64*) values)[i++] = v.i;
+		}
 	}
 	NextChar(parser); /* skip ')' */
 	*pNumInts = i;
@@ -501,7 +510,7 @@ static int ReadColor(struct parser *parser)
 		{ "navy", 0xff000080 }
 	};
 
-	Sint64 argb[4];
+	float values[4];
 	Uint32 num;
 	char *w;
 
@@ -514,42 +523,109 @@ static int ReadColor(struct parser *parser)
 			w++;
 		}
 		if (strcmp(w, "rgb") == 0) {
+			rgb_t rgb;
+
 			SkipSpace(parser);
-			if (ReadInts(parser, argb, ARRLEN(argb), &num) < 0) {
+			if (ReadValues(parser, values, ARRLEN(values),
+						&num, TYPE_FLOAT) < 0) {
 				return -1;
 			}
+			rgb.alpha = 1.0f;
 			switch (num) {
 			case 0:
-				parser->value.c = 0;
+				rgb.red = 0.0f;
+				rgb.green = 0.0f;
+				rgb.blue = 0.0f;
 				break;
-			case 1: {
-				const Uint8 gray = argb[0];
-				parser->value.c = 0xff000000 |
-					(gray << 16) | (gray << 8) | gray;
+			case 1:
+				rgb.red = values[0];
+				rgb.green = values[0];
+				rgb.blue = values[0];
 				break;
-			}
-			case 3: {
-				const Uint8 r = argb[0], g = argb[1],
-					b = argb[2];
-				parser->value.c = 0xff000000 |
-					(r << 16) | (g << 8) | b;
+			case 3:
+				rgb.red = values[0];
+				rgb.green = values[1];
+				rgb.blue = values[2];
 				break;
-			}
-			case 4: {
-				const Uint8 a = argb[0], r = argb[1],
-					g = argb[2], b = argb[3];
-				parser->value.c = (a << 24) |
-					(r << 16) | (g << 8) | b;
+			case 4:
+				rgb.alpha = values[0];
+				rgb.red = values[1];
+				rgb.green = values[2];
+				rgb.blue = values[3];
 				break;
-			}
 			default:
 				return -1;
 			}
+			parser->value.c = rgb;
+			return 0;
+		} else if(strcmp(w, "hsl") == 0) {
+			hsl_t hsl;
+
+			SkipSpace(parser);
+			if (ReadValues(parser, values, ARRLEN(values),
+						&num, TYPE_FLOAT) < 0) {
+				return -1;
+			}
+
+			hsl.alpha = 1.0f;
+			switch (num) {
+			case 1:
+				hsl.hue = 0.0f;
+				hsl.saturation = 0.0f;
+				hsl.lightness = values[0];
+				break;
+			case 3:
+				hsl.hue = values[0];
+				hsl.saturation = values[1];
+				hsl.lightness = values[2];
+				break;
+			case 4:
+				hsl.alpha = values[0];
+				hsl.hue = values[1];
+				hsl.saturation = values[2];
+				hsl.lightness = values[3];
+				break;
+			default:
+				return -1;
+			}
+			HslToRgb(&hsl, &parser->value.c);
+			return 0;
+		} else if(strcmp(w, "hsv") == 0) {
+			hsv_t hsv;
+
+			SkipSpace(parser);
+			if (ReadValues(parser, values, ARRLEN(values),
+						&num, TYPE_FLOAT) < 0) {
+				return -1;
+			}
+
+			hsv.alpha = 1.0f;
+			switch (num) {
+			case 1:
+				hsv.hue = 0.0f;
+				hsv.saturation = 0.0f;
+				hsv.value = values[0];
+				break;
+			case 3:
+				hsv.hue = values[0];
+				hsv.saturation = values[1];
+				hsv.value = values[2];
+				break;
+			case 4:
+				hsv.alpha = values[0];
+				hsv.hue = values[1];
+				hsv.saturation = values[2];
+				hsv.value = values[3];
+				break;
+			default:
+				return -1;
+			}
+			HsvToRgb(&hsv, &parser->value.c);
 			return 0;
 		}
 		for (size_t i = 0; i < ARRLEN(colors); i++) {
 			if (strcmp(colors[i].name, parser->word) == 0) {
-				parser->value.c = colors[i].color;
+				IntToRgb(colors[i].color, &parser->value.c);
 				return 0;
 			}
 		}
@@ -560,7 +636,7 @@ static int ReadColor(struct parser *parser)
 		if (ReadIntOrFloat(parser, &iof) < 0) {
 			return -1;
 		}
-		parser->value.c = iof_AsInt(&iof);
+		IntToRgb(iof_AsInt(&iof), &parser->value.c);
 	}
 	return 0;
 }
@@ -718,7 +794,7 @@ static int ReadPoint(struct parser *parser)
 	Sint64 nums[2];
 	Uint32 num;
 
-	if (ReadInts(parser, nums, ARRLEN(nums), &num) < 0) {
+	if (ReadValues(parser, nums, ARRLEN(nums), &num, TYPE_INTEGER) < 0) {
 		return -1;
 	}
 	switch (num) {
@@ -739,7 +815,7 @@ static int ReadRect(struct parser *parser)
 	Sint64 nums[4];
 	Uint32 num;
 
-	if (ReadInts(parser, nums, ARRLEN(nums), &num) < 0) {
+	if (ReadValues(parser, nums, ARRLEN(nums), &num, TYPE_INTEGER) < 0) {
 		return -1;
 	}
 	switch (num) {

@@ -1,14 +1,254 @@
 #include "gui.h"
 
+#define EPSILON 1.0e-5f
+
+Uint32 RgbToInt(const rgb_t *rgb)
+{
+	Uint8 a, r, g, b;
+
+	a = rgb->alpha * 255.0f;
+	r = rgb->red;
+	g = rgb->green;
+	b = rgb->blue;
+	return (a << 24) | (r << 16) | (g << 8) | b;
+}
+
+void IntToRgb(Uint32 color, rgb_t *rgb)
+{
+	rgb->alpha = (color >> 24) / 255.0f;
+	rgb->red = (color >> 16) & 0xff;
+	rgb->green = (color >> 8) & 0xff;
+	rgb->blue = color & 0xff;
+}
+
+void RgbToHsl(const rgb_t *rgb, hsl_t *hsl)
+{
+	float min, max, delta;
+
+	hsl->alpha = rgb->alpha;
+	min = rgb->red < rgb->green ? rgb->red : rgb->green;
+	min = min < rgb->blue ? min : rgb->blue;
+
+	max = rgb->red > rgb->green ? rgb->red : rgb->green;
+	max = max > rgb->blue ? max : rgb->blue;
+
+	delta = max - min;
+	hsl->lightness = delta / 255.0f;
+	if (delta < EPSILON) {
+		hsl->saturation = 0.0f;
+		hsl->hue = 0.0f;
+		return;
+	}
+
+	if (max > 0.0f) {
+		hsl->saturation = delta / max;
+	} else {
+		hsl->saturation = 0.0f;
+		hsl->hue = 0.0f;
+		return;
+	}
+
+	if (rgb->red == max) {
+		hsl->hue = (rgb->green - rgb->blue) / delta;
+	} else if(rgb->green == max) {
+		hsl->hue = 2.0f + (rgb->blue - rgb->red) / delta;
+	} else {
+		hsl->hue = 4.0f + (rgb->red - rgb->green) / delta;
+	}
+
+	hsl->hue *= 60.0f;
+	if (hsl->hue < 0.0f) {
+		hsl->hue += 360.0f;
+	}
+}
+
+void RgbToHsv(const rgb_t *rgb, hsv_t *hsv)
+{
+	float min, max, delta;
+
+	hsv->alpha = rgb->alpha;
+	min = rgb->red < rgb->green ? rgb->red : rgb->green;
+	min = min < rgb->blue ? min : rgb->blue;
+
+	max = rgb->red > rgb->green ? rgb->red : rgb->green;
+	max = max > rgb->blue ? max : rgb->blue;
+
+	hsv->value = max / 255.0f;
+	delta = max - min;
+	if (delta <= EPSILON) {
+		hsv->saturation = 0.0f;
+		hsv->hue = 0.0f;
+		return;
+	}
+
+	if (max > 0.0f) {
+		hsv->saturation = delta / max;
+	} else {
+		hsv->saturation = 0.0f;
+		hsv->hue = 0.0f;
+		return;
+	}
+
+	if (rgb->red == max) {
+		hsv->hue = (rgb->green - rgb->blue) / delta;
+	} else if(rgb->green == max) {
+		hsv->hue = 2.0f + (rgb->blue - rgb->red) / delta;
+	} else {
+		hsv->hue = 4.0f + (rgb->red - rgb->green) / delta;
+	}
+
+	hsv->hue *= 60.0f;
+	if (hsv->hue < 0.0f) {
+		hsv->hue += 360.0f;
+	}
+}
+
+void HsvToRgb(const hsv_t *hsv, rgb_t *rgb)
+{
+	float hh, p, q, t, ff;
+	int i;
+
+	rgb->alpha = hsv->alpha;
+	if (hsv->saturation <= EPSILON) {
+		rgb->red = hsv->value * 255.0f;
+		rgb->green = hsv->value * 255.0f;
+		rgb->blue = hsv->value * 255.0f;
+		return;
+	}
+
+	hh = hsv->hue;
+	if(hh >= 360.0f) {
+		hh = 0.0f;
+	}
+	hh /= 60.0f;
+	i = (int) hh;
+	ff = hh - i;
+	p = hsv->value * (1.0f - hsv->saturation);
+	q = hsv->value * (1.0f - hsv->saturation * ff);
+	t = hsv->value * (1.0f - hsv->saturation * (1.0f - ff));
+
+	switch (i) {
+	case 0:
+		rgb->red = hsv->value;
+		rgb->green = t;
+		rgb->blue = p;
+		break;
+	case 1:
+		rgb->red = q;
+		rgb->green = hsv->value;
+		rgb->blue = p;
+		break;
+	case 2:
+		rgb->red = p;
+		rgb->green = hsv->value;
+		rgb->blue = t;
+		break;
+	case 3:
+		rgb->red = p;
+		rgb->green = q;
+		rgb->blue = hsv->value;
+		break;
+	case 4:
+		rgb->red = t;
+		rgb->green = p;
+		rgb->blue = hsv->value;
+		break;
+	case 5:
+	default:
+		rgb->red = hsv->value;
+		rgb->green = p;
+		rgb->blue = q;
+		break;
+	}
+
+	rgb->red *= 255.f;
+	rgb->green *= 255.0f;
+	rgb->blue *= 255.0f;
+}
+
+void HsvToHsl(const hsv_t *hsv, hsl_t *hsl)
+{
+	hsl->alpha = hsv->alpha;
+	hsl->hue = hsv->hue;
+	hsl->lightness = (2.0f - hsv->saturation) * hsv->value / 2.0f;
+
+	if (hsl->lightness == 0.0f || hsl->lightness == 1.0f) {
+		hsl->saturation = 0.0f;
+	} else if (hsl->lightness < 0.5f) {
+		hsl->saturation = hsv->saturation * hsv->value /
+			(hsl->lightness * 2.0f);
+	} else {
+		hsl->saturation = hsv->saturation * hsv->value /
+			(2.0f - hsl->lightness * 2.0f);
+	}
+}
+
+void HslToHsv(const hsl_t *hsl, hsv_t *hsv)
+{
+	hsv->alpha = hsl->alpha;
+	hsv->hue = hsl->hue;
+	if (hsl->lightness <= 0.5f) {
+		hsv->saturation = 2.0f * hsl->saturation *
+			hsl->lightness / (1.0f + hsl->lightness);
+	} else {
+		hsv->saturation = 2.0f * hsl->saturation *
+			(1.0f - hsl->lightness) / (2.0f - hsl->lightness);
+	}
+	hsv->value = (hsl->lightness + hsl->saturation *
+			fmin(hsl->lightness, 1.0f - hsl->lightness)) / 2.0f;
+}
+
+void HslToRgb(const hsl_t *hsl, rgb_t *rgb)
+{
+	float c, x, m;
+	float r, g, b;
+
+	rgb->alpha = hsl->alpha;
+	c = (1.0f - fabs(2.0f * hsl->lightness - 1.0f)) * hsl->saturation;
+	x = c * (1.0f - fabs(fmod(hsl->hue / 60.0f, 2.0f) - 1.0f));
+	m = hsl->lightness - c / 2.0f;
+
+	if (hsl->hue >= 0.0f && hsl->hue < 60.0f) {
+		r = c;
+		g = x;
+		b = 0.0f;
+	} else if (hsl->hue >= 60.0f && hsl->hue < 120.0f) {
+		r = x;
+		g = c;
+		b = 0.0f;
+	} else if (hsl->hue >= 120.0f && hsl->hue < 180.0f) {
+		r = 0.0f;
+		g = c;
+		b = x;
+	} else if (hsl->hue >= 180.0f && hsl->hue < 240.0f) {
+		r = 0.0f;
+		g = x;
+		b = c;
+	} else if (hsl->hue >= 240.0f && hsl->hue < 300.0f) {
+		r = x;
+		g = 0.0f;
+		b = c;
+	} else {
+		r = c;
+		g = 0.0f;
+		b = x;
+	}
+
+	rgb->red = (r + m) * 255.0f;
+	rgb->green = (g + m) * 255.0f;
+	rgb->blue = (b + m) * 255.0f;
+}
+
 int renderer_SetDrawColor(Renderer *renderer, Uint32 color)
 {
 	return SDL_SetRenderDrawColor(renderer, (color >> 16) & 0xff,
 			(color >> 8) & 0xff, color & 0xff, 255);
 }
 
-int renderer_SetDrawColorRGB(Renderer *renderer, Uint8 r, Uint8 g, Uint8 b)
+int renderer_SetDrawColorRGB(Renderer *renderer, Uint8 a,
+		Uint8 r, Uint8 g, Uint8 b)
 {
-	return SDL_SetRenderDrawColor(renderer, r, g, b, 255);
+	return SDL_SetRenderDrawColor(renderer, r, g, b, a);
 }
 
 int renderer_DrawRect(Renderer *renderer, Rect *rect)

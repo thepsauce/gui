@@ -104,13 +104,14 @@ bool view_GetBoolProperty(View *view, const char *name)
 	return prop->b;
 }
 
-Uint32 view_GetColorProperty(View *view, const char *name)
+int view_GetColorProperty(View *view, const char *name, rgb_t *rgb)
 {
-	Value *const prop = view_GetProperty(view, TYPE_COLOR, name);
-	if (prop == NULL) {
-		return 0;
+	Value *const value = view_GetProperty(view, TYPE_COLOR, name);
+	if (value == NULL) {
+		return -1;
 	}
-	return prop->c;
+	*rgb = value->c;
+	return 0;
 }
 
 int view_SetParent(View *view, View *parent)

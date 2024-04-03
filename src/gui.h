@@ -35,6 +35,36 @@ typedef SDL_Renderer Renderer;
 typedef SDL_Rect Rect;
 typedef SDL_Point Point;
 
+typedef struct {
+	float alpha;
+	float red;
+	float green;
+	float blue;
+} rgb_t;
+
+typedef struct {
+	float alpha;
+	float hue;
+	float saturation;
+	float value;
+} hsv_t;
+
+typedef struct {
+	float alpha;
+	float hue;
+	float saturation;
+	float lightness;
+} hsl_t;
+
+Uint32 RgbToInt(const rgb_t *rgb);
+void IntToRgb(Uint32 color, rgb_t *rgb);
+void RgbToHsl(const rgb_t *rgb, hsl_t *hsl);
+void RgbToHsv(const rgb_t *rgb, hsv_t *hsv);
+void HsvToRgb(const hsv_t *hsv, rgb_t *rgb);
+void HsvToHsl(const hsv_t *hsv, hsl_t *hsl);
+void HslToHsv(const hsl_t *hsl, hsv_t *hsv);
+void HslToRgb(const hsl_t *hsl, rgb_t *rgb);
+
 #define GUI_INIT_CLASSES 0x01
 
 int gui_Init(Uint32 flags);
@@ -44,7 +74,8 @@ int gui_Run(void);
 
 Renderer *renderer_Default(void);
 int renderer_SetDrawColor(Renderer *renderer, Uint32 color);
-int renderer_SetDrawColorRGB(Renderer *renderer, Uint8 r, Uint8 g, Uint8 b);
+int renderer_SetDrawColorRGB(Renderer *renderer, Uint8 a,
+		Uint8 r, Uint8 g, Uint8 b);
 int renderer_DrawRect(Renderer *renderer, Rect *rect);
 int renderer_FillRect(Renderer *renderer, Rect *rect);
 int renderer_DrawLine(Renderer *renderer, Sint32 x1, Sint32 y1,
@@ -265,7 +296,7 @@ typedef struct value {
 	union {
 		struct value_array *a;
 		bool b;
-		Uint32 c;
+		rgb_t c;
 		struct value_event e;
 		float f;
 		Function *func;
@@ -436,6 +467,6 @@ int view_SendRecursive(View *view, event_t type, EventInfo *info);
 int view_Send(View *view, event_t type, EventInfo *info);
 Value *view_GetProperty(View *view, type_t type, const char *name);
 bool view_GetBoolProperty(View *view, const char *name);
-Uint32 view_GetColorProperty(View *view, const char *name);
+int view_GetColorProperty(View *view, const char *name, rgb_t *rgb);
 int view_SetParent(View *view, View *parent);
 void view_Delete(View *view);

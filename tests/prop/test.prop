@@ -17,7 +17,7 @@ main = function {
 	local s = CreateView("Some")
 	s.me()
 
-	print(color white.r, "\n")
+	print(color white.red, "\n")
 	if 2 < 3 {
 		print("2 < 3: ye\n")
 	} else {
@@ -77,8 +77,7 @@ Button::draw = function {
 	SetDrawColor(color green)
 	DrawText("Hello there\nWhat is this?\nおす\n", 30, 30)
 
-	SetDrawColor(color white)
-	SetDrawColor(color rgb (255))
+	SetDrawColor(color hsl (200, 1, 0.4))
 	DrawEllipse(80, 80, 30, 30)
 	FillEllipse(mouse.x, mouse.y, 30, 30)
 }

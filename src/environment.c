@@ -57,7 +57,7 @@ int value_Cast(const Value *in, type_t type, Value *out)
 	switch (type) {
 	case TYPE_INTEGER:
 		if (in->type == TYPE_COLOR) {
-			out->i = in->c;
+			out->i = RgbToInt(&in->c);
 		} else if (in->type == TYPE_FLOAT) {
 			out->i = in->f;
 		} else {
@@ -66,7 +66,7 @@ int value_Cast(const Value *in, type_t type, Value *out)
 		break;
 	case TYPE_FLOAT:
 		if (in->type == TYPE_COLOR) {
-			out->f = in->c;
+			out->f = RgbToInt(&in->c);
 		} else if (in->type == TYPE_INTEGER) {
 			out->f = in->i;
 		} else {
@@ -75,9 +75,9 @@ int value_Cast(const Value *in, type_t type, Value *out)
 		break;
 	case TYPE_COLOR:
 		if (in->type == TYPE_FLOAT) {
-			out->c = in->f;
+			IntToRgb(in->f, &out->c);
 		} else if (in->type == TYPE_INTEGER) {
-			out->c = in->i;
+			IntToRgb(in->i, &out->c);
 		} else {
 			return -1;
 		}
@@ -158,72 +158,41 @@ static int GetSubVariable(Value *value, const char *sub, Value *result)
 	case TYPE_SUCCESS:
 		return -1;
 
-	case TYPE_COLOR:
-		result->type = TYPE_INTEGER;
-		if (sub[0] == '\0' || sub[1] != '\0') {
-			return -1;
-		}
-		switch (sub[0]) {
-		case 'a':
-			result->i = (value->i >> 24) & 0xff;
-			break;
-		case 'r':
-			result->i = (value->i >> 16) & 0xff;
-			break;
-		case 'g':
-			result->i = (value->i >> 8) & 0xff;
-			break;
-		case 'b':
-			result->i = value->i & 0xff;
-			break;
-		case 'h':
-		case 's':
-		case 'l': {
-			Uint8 ri, gi, bi;
-			double r, g, b, min, max;
-			double h, s, l;
-			double d;
+	case TYPE_COLOR: {
+		rgb_t rgb;
+		hsl_t hsl;
+		hsv_t hsv;
 
-			ri = (value->i >> 16) & 0xff;
-			gi = (value->i >> 8) & 0xff;
-			bi = value->i & 0xff;
-
-			r = ri / 255.0;
-			g = gi / 255.0;
-			b = bi / 255.0;
-
-			min = MIN(MIN(r, g), b);
-			max = MAX(MAX(r, g), b);
-
-			l = (max + min) / 2.0;
-			if (sub[0] == 'l') {
-				result->i = l * 100;
-				break;
-			}
-
-			d = max - min;
-			s = l > 0.5 ? d / (2.0 - max - min) : d / (max + min);
-
-			if (sub[0] == 's') {
-				result->i = s * 100;
-				break;
-			}
-
-			if (max == r) {
-				h = (g - b) / d + (g < b ? 6.0 : 0.0);
-			} else if (max == g) {
-				h = (b - r) / d + 2.0;
-			} else {
-				h = (r - g) / d + 4.0;
-			}
-			h /= 6.0;
-			result->i = h * 360;
-			break;
-		}
-		default:
+		result->type = TYPE_FLOAT;
+		rgb = value->c;
+		if (strcmp(sub, "alpha") == 0) {
+			result->f = rgb.alpha;
+		} else if (strcmp(sub, "red") == 0) {
+			result->f = rgb.red;
+		} else if (strcmp(sub, "green") == 0) {
+			result->f = rgb.green;
+		} else if (strcmp(sub, "blue") == 0) {
+			result->f = rgb.blue;
+		} else if (strcmp(sub, "hue") == 0) {
+			RgbToHsl(&rgb, &hsl);
+			result->f = hsl.hue;
+		} else if (strcmp(sub, "saturation") == 0) {
+			RgbToHsl(&rgb, &hsl);
+			result->f = hsl.saturation;
+		} else if (strcmp(sub, "lightness") == 0) {
+			RgbToHsl(&rgb, &hsl);
+			result->f = hsl.lightness;
+		} else if (strcmp(sub, "saturation2") == 0) {
+			RgbToHsv(&rgb, &hsv);
+			result->f = hsv.saturation;
+		} else if (strcmp(sub, "value") == 0) {
+			RgbToHsv(&rgb, &hsv);
+			result->f = hsv.value;
+		} else {
 			return -1;
 		}
 		break;
+	}
 
 	case TYPE_EVENT:
 		/* TODO: maybe? */
@@ -297,38 +266,51 @@ static int SetSubVariable(Value *value, const char *sub, Value *result)
 		/* TODO: maybe? */
 		return -1;
 
-	case TYPE_COLOR:
-		result->type = TYPE_INTEGER;
-		if (sub[0] == '\0' || sub[1] != '\0') {
+	case TYPE_COLOR: {
+		hsl_t hsl;
+		hsv_t hsv;
+
+		if (value_Cast(result, TYPE_FLOAT, &actual) < 0) {
 			return -1;
 		}
-		switch (sub[0]) {
-		case 'a':
-			value->i &= ~0xff000000;
-			value->i |= (result->i & 0xff) << 24;
-			break;
-		case 'r':
-			value->i &= ~0xff0000;
-			value->i |= (result->i & 0xff) << 16;
-			break;
-		case 'g':
-			value->i &= ~0xff00;
-			value->i |= (result->i & 0xff) << 8;
-			break;
-		case 'b':
-			value->i &= ~0xff;
-			value->i |= result->i & 0xff;
-			break;
-		default:
+		if (strcmp(sub, "alpha") == 0) {
+			value->c.alpha = actual.f;
+		} else if (strcmp(sub, "red") == 0) {
+			value->c.red = actual.f;
+		} else if (strcmp(sub, "green") == 0) {
+			value->c.green = actual.f;
+		} else if (strcmp(sub, "blue") == 0) {
+			value->c.blue = actual.f;
+		} else if (strcmp(sub, "hue") == 0) {
+			RgbToHsl(&value->c, &hsl);
+			hsl.hue = actual.f;
+			HslToRgb(&hsl, &value->c);
+		} else if (strcmp(sub, "saturation") == 0) {
+			RgbToHsl(&value->c, &hsl);
+			hsl.saturation = actual.f;
+			HslToRgb(&hsl, &value->c);
+		} else if (strcmp(sub, "lightness") == 0) {
+			RgbToHsl(&value->c, &hsl);
+			hsl.lightness = actual.f;
+			HslToRgb(&hsl, &value->c);
+		} else if (strcmp(sub, "saturation2") == 0) {
+			RgbToHsv(&value->c, &hsv);
+			hsv.saturation = actual.f;
+			HsvToRgb(&hsv, &value->c);
+		} else if (strcmp(sub, "value") == 0) {
+			RgbToHsv(&value->c, &hsv);
+			hsv.value = actual.f;
+			HsvToRgb(&hsv, &value->c);
+		} else {
 			return -1;
 		}
 		break;
+	}
 
 	case TYPE_POINT:
 		if (value_Cast(result, TYPE_INTEGER, &actual) < 0) {
 			return -1;
 		}
-		result->type = TYPE_INTEGER;
 		if (sub[0] == '\0' || sub[1] != '\0') {
 			return -1;
 		}
@@ -348,7 +330,6 @@ static int SetSubVariable(Value *value, const char *sub, Value *result)
 		if (value_Cast(result, TYPE_INTEGER, &actual) < 0) {
 			return -1;
 		}
-		result->type = TYPE_INTEGER;
 		if (sub[0] == '\0' || sub[1] != '\0') {
 			return -1;
 		}
@@ -951,7 +932,7 @@ static bool Equals(Value *v1, Value *v2)
 		}
 		break;
 	case TYPE_COLOR:
-		if (v1->c != v2->c) {
+		if (memcmp(&v1->c, &v2->c, sizeof(v1->c)) != 0) {
 			return false;
 		}
 		break;
@@ -1415,7 +1396,8 @@ static void PrintValue(Value *value, FILE *fp)
 				"true" : "false");
 		break;
 	case TYPE_COLOR:
-		fprintf(fp, "%#x", value->c);
+		fprintf(fp, "argb(%f, %f, %f, %f)", value->c.alpha,
+				value->c.red, value->c.green, value->c.blue);
 		break;
 	case TYPE_EVENT:
 		break;
@@ -1712,7 +1694,8 @@ static int SystemSetDrawColor(Value *args, Uint32 numArgs, Value *result)
 		return -1;
 	}
 
-	renderer_SetDrawColor(renderer_Default(), value.c);
+	renderer_SetDrawColorRGB(renderer_Default(), value.c.alpha * 255.0f,
+			value.c.red, value.c.green, value.c.blue);
 	(void) result;
 	return 0;
 }
