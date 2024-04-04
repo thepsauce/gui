@@ -37,11 +37,16 @@ static void Refresh(struct parser *parser)
 		nWritten = parser->iWrite - parser->iRead;
 	}
 	if (nWritten < sizeof(parser->buffer) / 2) {
-		if (parser->iRead < parser->iWrite) {
+		if (parser->iRead == 0) {
+			const size_t n = fread(&parser->buffer[parser->iWrite],
+					1, sizeof(parser->buffer) - 1 -
+					nWritten, parser->file);
+			parser->iWrite += n;
+		} else if (parser->iRead < parser->iWrite) {
 			const size_t n = fread(&parser->buffer[parser->iWrite],
 					1, sizeof(parser->buffer) -
 					parser->iWrite, parser->file);
-			if (parser->iRead > 0) {
+			if (parser->iWrite + n >= sizeof(parser->buffer)) {
 				parser->iWrite = fread(&parser->buffer[0], 1,
 						parser->iRead - 1,
 						parser->file);
@@ -49,6 +54,9 @@ static void Refresh(struct parser *parser)
 				parser->iWrite += n;
 			}
 		} else {
+			/* in this configuration (buffer size = 1024 and reading
+			 * when the buffer was half read this part of the code
+			 * will never be reached */
 			const size_t n = fread(&parser->buffer[parser->iWrite],
 					1, sizeof(parser->buffer) - 1 -
 					nWritten, parser->file);
@@ -69,7 +77,7 @@ static int NextChar(struct parser *parser)
 	if (parser->c == '\n') {
 		parser->line++;
 		parser->column = 0;
-	} else if (parser->c != EOF) {
+	} else {
 		parser->column++;
 	}
 	return parser->c;
@@ -1074,10 +1082,16 @@ static int ResolveConstant(struct parser *parser)
 		{ "EVENT_BUTTONUP", { TYPE_INTEGER, .i = EVENT_BUTTONUP } },
 		{ "EVENT_MOUSEMOVE", { TYPE_INTEGER, .i = EVENT_MOUSEMOVE } },
 		{ "EVENT_MOUSEWHEEL", { TYPE_INTEGER, .i = EVENT_MOUSEWHEEL } },
+		{ "EVENT_TEXTINPUT", { TYPE_INTEGER, .i = EVENT_TEXTINPUT } },
 
 		{ "BUTTON_LEFT", { TYPE_INTEGER, .i = SDL_BUTTON_LEFT } },
 		{ "BUTTON_MIDDLE", { TYPE_INTEGER, .i = SDL_BUTTON_MIDDLE } },
 		{ "BUTTON_RIGHT", { TYPE_INTEGER, .i = SDL_BUTTON_RIGHT } },
+
+		{ "KEY_RETURN", { TYPE_INTEGER, .i = SDLK_RETURN } },
+		{ "KEY_BACKSPACE", { TYPE_INTEGER, .i = SDLK_BACKSPACE } },
+		{ "KEY_TAB", { TYPE_INTEGER, .i = SDLK_TAB } },
+		/* TODO: add all keys */
 	};
 
 	for (Uint32 i = 0; i < ARRLEN(constants); i++) {

@@ -495,6 +495,8 @@ struct font *cached_fonts;
 Uint32 num_fonts;
 Uint32 cur_font;
 
+float tab_multiplier = 4.0f;
+
 static Uint32 AddFont(Font *font)
 {
 	Uint32 iFont;
@@ -548,6 +550,11 @@ int renderer_SelectFont(Uint32 index)
 	}
 	cur_font = index;
 	return 0;
+}
+
+void renderer_SetTabMultiplier(float multp)
+{
+	tab_multiplier = multp;
 }
 
 Font *renderer_CreateFont(const char *name, int size, Uint32 *pIndex)
@@ -649,8 +656,7 @@ int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y)
 {
 	struct font *font;
 	Uint8 r, g, b, a;
-	int advance;
-	int height;
+	int advance, tabWidth, height;
 	Sint32 cx, cy;
 	const char *end;
 	char *data = NULL, *newData;
@@ -662,6 +668,7 @@ int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y)
 	SDL_GetRenderDrawColor(renderer, &r, &g, &b, &a);
 
 	TTF_GlyphMetrics32(font->font, ' ', NULL, NULL, NULL, NULL, &advance);
+	tabWidth = advance * tab_multiplier;
 	height = TTF_FontHeight(font->font);
 
 	cx = x;
@@ -675,7 +682,7 @@ int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y)
 				cx += advance;
 				break;
 			case '\t':
-				cx += 4 * advance - (x - cx) % (4 * advance);
+				cx += tabWidth - (x - cx) % tabWidth;
 				break;
 			case '\n':
 				cx = x;
@@ -726,7 +733,9 @@ int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y)
 		cx += word->width;
 		text = end;
 	}
-	union_Free(union_Default(), data);
+	if (data != NULL) {
+		union_Free(union_Default(), data);
+	}
 	return 0;
 }
 

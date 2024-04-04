@@ -1684,6 +1684,97 @@ static int SystemRect(const Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
+static int SystemRemove(const Value *args, Uint32 numArgs, Value *result)
+{
+	Value val;
+	Uint32 range[2];
+
+	if (numArgs < 2 || numArgs > 3) {
+		return -1;
+	}
+
+	if (value_Cast(&args[1], TYPE_INTEGER, &val) < 0) {
+		return -1;
+	}
+	if (val.i < 0) {
+		return -1;
+	}
+	range[0] = val.i;
+
+	if (numArgs == 3) {
+		if (value_Cast(&args[2], TYPE_INTEGER, &val) < 0) {
+			return -1;
+		}
+		if (val.i < 0) {
+			return -1;
+		}
+	}
+	range[1] = val.i;
+
+	if (range[0] > range[1]) {
+		return -1;
+	}
+
+	switch (args[0].type) {
+	case TYPE_ARRAY: {
+		struct value_array *arr;
+
+		arr = args[0].a;
+		if (range[0] >= arr->numValues || range[1] >= arr->numValues) {
+			return -1;
+		}
+		memmove(&arr->values[range[0]], &arr->values[range[1] + 1],
+				sizeof(*arr->values) *
+				(arr->numValues - range[1] - 1));
+		arr->numValues -= range[1] + 1 - range[0];
+		break;
+	}
+	case TYPE_STRING: {
+		struct value_string *str;
+
+		str = args[0].s;
+		if (range[0] >= str->length || range[1] >= str->length) {
+			return -1;
+		}
+		memmove(&str->data[range[0]], &str->data[range[1] + 1],
+				str->length - range[1] - 1);
+		str->length -= range[1] + 1 - range[0];
+		break;
+	}
+	default:
+		return -1;
+	}
+	(void) result;
+	return 0;
+}
+
+static int SystemSub(const Value *args, Uint32 numArgs, Value *result)
+{
+	Value val;
+
+	if (numArgs != 2) {
+		return -1;
+	}
+	if (args[0].type == TYPE_FLOAT || args[1].type == TYPE_FLOAT) {
+		if (value_Cast(&args[0], TYPE_FLOAT, result) < 0) {
+			return -1;
+		}
+		if (value_Cast(&args[1], TYPE_FLOAT, &val) < 0) {
+			return -1;
+		}
+		result->f -= val.f;
+	} else {
+		if (value_Cast(&args[0], TYPE_INTEGER, result) < 0) {
+			return -1;
+		}
+		if (value_Cast(&args[1], TYPE_INTEGER, &val) < 0) {
+			return -1;
+		}
+		result->i -= val.i;
+	}
+	return 0;
+}
+
 static int SystemSum(const Value *args, Uint32 numArgs, Value *result)
 {
 	Value val;
@@ -2074,6 +2165,36 @@ static int SystemGetWindowHeight(const Value *args, Uint32 numArgs, Value *resul
 	return 0;
 }
 
+static int SystemGetText(const Value *args, Uint32 numArgs, Value *result)
+{
+	struct value_string *str;
+	Uint32 len;
+	char *data;
+
+	if (numArgs != 1 || args[0].type != TYPE_EVENT) {
+		return -1;
+	}
+	str = union_Alloc(union_Default(), sizeof(*str));
+	if (str == NULL) {
+		return -1;
+	}
+
+	len = strlen(args[0].e.info.ti.text);
+	data = union_Alloc(union_Default(), len + 1);
+	if (data == NULL) {
+		return -1;
+	}
+	memcpy(data, args[0].e.info.ti.text, len);
+	data[len] = '\0';
+
+	str->data = data;
+	str->length = len;
+
+	result->type = TYPE_STRING;
+	result->s = str;
+	return 0;
+}
+
 static int SystemGetType(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 1 || args[0].type != TYPE_EVENT) {
@@ -2121,6 +2242,16 @@ static int SystemGetFontSize(const Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
+static int SystemGetKey(const Value *args, Uint32 numArgs, Value *result)
+{
+	if (numArgs != 1 || args[0].type != TYPE_EVENT) {
+		return -1;
+	}
+	result->type = TYPE_INTEGER;
+	result->i = args[0].e.info.ki.sym.sym;
+	return 0;
+}
+
 static int SystemGetWheel(const Value *args, Uint32 numArgs, Value *result)
 {
 	if (numArgs != 1 || args[0].type != TYPE_EVENT) {
@@ -2165,7 +2296,9 @@ static int ExecuteSystem(const char *call,
 		{ "print", SystemPrint },
 		{ "rand", SystemRand },
 		{ "rect", SystemRect },
+		{ "remove", SystemRemove },
 		{ "rgb", SystemRgb },
+		{ "sub", SystemSub },
 		{ "sum", SystemSum },
 
 		{ "Contains", SystemContains },
@@ -2179,10 +2312,12 @@ static int ExecuteSystem(const char *call,
 		{ "FillRect", SystemFillRect },
 		{ "GetButton", SystemGetButton },
 		{ "GetFontSize", SystemGetFontSize },
+		{ "GetKey", SystemGetKey },
 		{ "GetParent", SystemGetParent },
 		{ "GetPos", SystemGetPos },
 		{ "GetProperty", SystemGetProperty },
 		{ "GetRect", SystemGetRect },
+		{ "GetText", SystemGetText },
 		{ "GetType", SystemGetType },
 		{ "GetWheel", SystemGetWheel },
 		{ "GetWindowHeight", SystemGetWindowHeight },

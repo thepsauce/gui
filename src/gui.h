@@ -97,6 +97,7 @@ Font *renderer_CreateFont(const char *name, int size, Uint32 *pIndex);
 Font *renderer_GetFont(Uint32 index);
 int renderer_SelectFont(Uint32 index);
 int renderer_SetFont(Font *font);
+void renderer_SetTabMultiplier(float multp);
 int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y);
 
 bool rect_IsEmpty(const Rect *rect);
@@ -177,6 +178,7 @@ typedef enum {
 	EVENT_CAPTUREDMOVE,
 	EVENT_SETCURSOR,
 	EVENT_MOUSEWHEEL,
+	EVENT_TEXTINPUT,
 } event_t;
 
 struct key_info {
@@ -201,11 +203,16 @@ struct mouse_wheel_info {
 	Sint32 x, y;
 };
 
+struct text_info {
+	char text[32];
+};
+
 typedef union event_info {
 	struct key_info ki;
 	struct mouse_info mi;
 	struct mouse_move_info mmi;
 	struct mouse_wheel_info mwi;
+	struct text_info ti;
 } EventInfo;
 
 typedef struct event {

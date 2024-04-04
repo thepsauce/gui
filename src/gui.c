@@ -105,6 +105,12 @@ static int TranslateEvent(const SDL_Event *event,
 		info->mwi.x = event->wheel.x;
 		info->mwi.y = event->wheel.y;
 		break;
+	case SDL_TEXTINPUT:
+		*type = EVENT_TEXTINPUT;
+		strcpy(info->ti.text, event->text.text);
+		break;
+	case SDL_TEXTEDITING:
+		break;
 	case SDL_QUIT:
 		gui_running = false;
 		/* fall through */
@@ -121,6 +127,7 @@ int gui_Run(void)
 	event_t type;
 	EventInfo info;
 
+	SDL_StartTextInput();
 	start = SDL_GetTicks64();
 	gui_running = true;
 	while (gui_running) {

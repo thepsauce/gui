@@ -14,6 +14,10 @@ Some:
 	}
 
 main = function {
+	local t = dup("hey")
+	remove(t, 1)
+	print("t=", t, "\n")
+
 	local s = CreateView("Some")
 	s.me()
 
@@ -69,6 +73,7 @@ stylistic choice, it reminds of C++ ;
 Button::font = int 0
 Button::fontSize = int 16
 Button::mouse = point()
+Button::text = dup("")
 
 Button::init = function {
 	font = CreateFont("FiraCode-Regular.ttf", fontSize)
@@ -82,6 +87,9 @@ Button::draw = function {
 	SetDrawColor(hsl(200, 1, 0.4))
 	DrawEllipse(80, 80, 30, 30)
 	FillEllipse(mouse.x, mouse.y, 30, 30)
+
+	SetDrawColor(color magenta)
+	DrawText(text, 0, 100)
 }
 
 Button::event = function event e {
@@ -98,4 +106,20 @@ Button::event = function event e {
 		}
 		font = CreateFont("FiraCode-Regular.ttf", fontSize)
 	}
+	if GetType(e) == const EVENT_KEYDOWN {
+		if GetKey(e) == const KEY_RETURN {
+			insert(text, "\n")
+		} else if GetKey(e) == const KEY_TAB {
+			insert(text, "\t")
+		} else if GetKey(e) == const KEY_BACKSPACE {
+			local l = length(text)
+			if l > 0 {
+				remove(text, l - 1)
+			}
+		}
+	}
+	if GetType(e) == const EVENT_TEXTINPUT {
+		insert(text, GetText(e))
+	}
 }
+
