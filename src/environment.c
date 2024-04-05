@@ -487,6 +487,81 @@ int function_Execute(Function *func, Instruction *args, Uint32 numArgs,
 	return 0;
 }
 
+static bool Equals(const Value *v1, const Value *v2)
+{
+	switch (v1->type) {
+	case TYPE_NULL:
+		return false;
+	case TYPE_ARRAY:
+		if (v1->a->numValues != v2->a->numValues) {
+			return false;
+		}
+		for (Uint32 i = 0; i < v1->a->numValues; i++) {
+			if (!Equals(&v1->a->values[i], &v2->a->values[i])) {
+				return false;
+			}
+		}
+		break;
+	case TYPE_BOOL:
+		if (v1->b != v2->b) {
+			return false;
+		}
+		break;
+	case TYPE_EVENT:
+		/* TODO:? who cares about comparing events? */
+		return false;
+	case TYPE_INTEGER:
+		if (v1->i != v2->i) {
+			return false;
+		}
+		break;
+	case TYPE_COLOR:
+		if (memcmp(&v1->c, &v2->c, sizeof(v1->c)) != 0) {
+			return false;
+		}
+		break;
+	case TYPE_FLOAT:
+		if (v1->f != v2->f) {
+			return false;
+		}
+		break;
+	case TYPE_FUNCTION:
+		if (v1->func != v2->func) {
+			return false;
+		}
+		break;
+	case TYPE_POINT:
+		if (v1->p.x != v2->p.x || v1->p.y != v2->p.y) {
+			return false;
+		}
+		break;
+	case TYPE_RECT:
+		if (v1->r.x != v2->r.x || v1->r.y != v2->r.y ||
+				v1->r.w != v2->r.w || v1->r.h != v2->r.h) {
+			return false;
+		}
+		break;
+	case TYPE_STRING:
+		if (v1->s->length != v2->s->length ||
+				memcmp(v1->s->data, v2->s->data, v1->s->length)
+				!= 0) {
+			return false;
+		}
+		break;
+	case TYPE_SUCCESS:
+		if (strcmp(v1->succ.id, v2->succ.id) != 0) {
+			return false;
+		}
+		break;
+	case TYPE_VIEW:
+		if (v1->v != v2->v) {
+			return false;
+		}
+		break;
+	}
+	return true;
+}
+
 static int ExecuteInstruction(Instruction *instr, Value *result);
 
 static int EvaluateInstruction(Instruction *instr, Value *result)
@@ -502,6 +577,7 @@ static int EvaluateInstruction(Instruction *instr, Value *result)
 	case INSTR_IF:
 	case INSTR_LOCAL:
 	case INSTR_RETURN:
+	case INSTR_SWITCH:
 	case INSTR_WHILE:
 		return -1;
 	case INSTR_SET:
@@ -771,6 +847,36 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 		}
 		break;
 
+	case INSTR_SWITCH: {
+		Uint32 i = UINT32_MAX;
+		int r;
+
+		if (EvaluateInstruction(instr->switchh.value, result) < 0) {
+			return -1;
+		}
+		for (Uint32 j = 0; j < instr->switchh.numJumps; j++) {
+			if (EvaluateInstruction(&instr->switchh.conditions[j],
+						&val) < 0) {
+				return -1;
+			}
+			if (Equals(&val, result)) {
+				i = instr->switchh.jumps[j];
+				break;
+			}
+		}
+		for (; i < instr->switchh.numInstructions; i++) {
+			r = ExecuteInstruction(&instr->switchh.instructions[i],
+					result);
+			if (r == 2) {
+				return 0;
+			}
+			if (r != 0) {
+				return r;
+			}
+		}
+		break;
+	}
+
 	case INSTR_TRIGGER: {
 		struct trigger *trigger;
 
@@ -949,81 +1055,6 @@ static int SystemDup(const Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
-static bool Equals(const Value *v1, const Value *v2)
-{
-	switch (v1->type) {
-	case TYPE_NULL:
-		return false;
-	case TYPE_ARRAY:
-		if (v1->a->numValues != v2->a->numValues) {
-			return false;
-		}
-		for (Uint32 i = 0; i < v1->a->numValues; i++) {
-			if (!Equals(&v1->a->values[i], &v2->a->values[i])) {
-				return false;
-			}
-		}
-		break;
-	case TYPE_BOOL:
-		if (v1->b != v2->b) {
-			return false;
-		}
-		break;
-	case TYPE_EVENT:
-		/* TODO:? who cares about comparing events? */
-		return false;
-	case TYPE_INTEGER:
-		if (v1->i != v2->i) {
-			return false;
-		}
-		break;
-	case TYPE_COLOR:
-		if (memcmp(&v1->c, &v2->c, sizeof(v1->c)) != 0) {
-			return false;
-		}
-		break;
-	case TYPE_FLOAT:
-		if (v1->f != v2->f) {
-			return false;
-		}
-		break;
-	case TYPE_FUNCTION:
-		if (v1->func != v2->func) {
-			return false;
-		}
-		break;
-	case TYPE_POINT:
-		if (v1->p.x != v2->p.x || v1->p.y != v2->p.y) {
-			return false;
-		}
-		break;
-	case TYPE_RECT:
-		if (v1->r.x != v2->r.x || v1->r.y != v2->r.y ||
-				v1->r.w != v2->r.w || v1->r.h != v2->r.h) {
-			return false;
-		}
-		break;
-	case TYPE_STRING:
-		if (v1->s->length != v2->s->length ||
-				memcmp(v1->s->data, v2->s->data, v1->s->length)
-				!= 0) {
-			return false;
-		}
-		break;
-	case TYPE_SUCCESS:
-		if (strcmp(v1->succ.id, v2->succ.id) != 0) {
-			return false;
-		}
-		break;
-	case TYPE_VIEW:
-		if (v1->v != v2->v) {
-			return false;
-		}
-		break;
-	}
-	return true;
-}
-
 static int SystemEquals(const Value *args, Uint32 numArgs, Value *result)
 {
 	result->type = TYPE_BOOL;
@@ -1123,6 +1154,37 @@ static int SystemGet(const Value *args, Uint32 numArgs, Value *result)
 		result->type = TYPE_INTEGER;
 		result->i = args[0].s->data[val.i];
 	} else {
+		return -1;
+	}
+	return 0;
+}
+
+static int SystemGetTextExtent(const Value *args, Uint32 numArgs, Value *result)
+{
+	Value val;
+
+	if (numArgs == 0 || args[0].type != TYPE_STRING) {
+		return -1;
+	}
+	if (numArgs == 2) {
+		if (value_Cast(&args[1], TYPE_INTEGER, &val) < 0) {
+			return -1;
+		}
+		if (val.i < 0) {
+			return -1;
+		}
+		if (val.i > args[0].s->length) {
+			val.i = args[0].s->length;
+		}
+	} else if (numArgs == 1) {
+		val.i = args[0].s->length;
+	} else {
+		return -1;
+	}
+
+	result->type = TYPE_RECT;
+	if (renderer_GetTextExtent(renderer_Default(), args[0].s->data, val.i,
+				&result->r) < 0) {
 		return -1;
 	}
 	return 0;
@@ -1268,42 +1330,66 @@ static int SystemHsv(const Value *args, Uint32 numArgs, Value *result)
 
 static int SystemInsert(const Value *args, Uint32 numArgs, Value *result)
 {
-	if (numArgs < 2) {
+	Value val;
+	Sint64 index;
+
+	if (numArgs < 3) {
 		return -1;
 	}
+	if (value_Cast(&args[1], TYPE_INTEGER, &val) < 0) {
+		return -1;
+	}
+	index = val.i;
+
 	if (args[0].type == TYPE_ARRAY) {
 		struct value_array *arr;
 		Value *newValues;
 
 		arr = args[0].a;
+		if (index < 0) {
+			index = arr->numValues + index;
+		}
+		if (index < 0 || index > arr->numValues) {
+			return -1;
+		}
 		if (arr->values != NULL &&
 				!union_HasPointer(environment.uni,
 					arr->values)) {
 			return -1;
 		}
+
 		newValues = union_Realloc(environment.uni, arr->values,
 				sizeof(*arr->values) *
-				(arr->numValues + numArgs - 1));
+				(arr->numValues + numArgs - 2));
 		if (newValues == NULL) {
 			return -1;
 		}
 		arr->values = newValues;
-		memcpy(&arr->values[arr->numValues], &args[1],
-				sizeof(*arr->values) * (numArgs - 1));
-		arr->numValues += numArgs - 1;
+		memmove(&arr->values[index + numArgs - 2], &arr->values[index],
+				sizeof(*arr->values) *
+				(arr->numValues - index));
+		memcpy(&arr->values[index], &args[2],
+				sizeof(*arr->values) * (numArgs - 2));
+		arr->numValues += numArgs - 2;
 	} else if (args[0].type == TYPE_STRING) {
 		struct value_string *str;
-		Uint32 count, index;
+		Uint32 count;
 		char *newData;
 
 		str = args[0].s;
+		if (index < 0) {
+			index = str->length + index;
+		}
+		if (index < 0 || index > str->length) {
+			return -1;
+		}
 		if (str->data != NULL &&
 				!union_HasPointer(environment.uni, str->data)) {
 			return -1;
 		}
 
 		count = 0;
-		for (Uint32 i = 1; i < numArgs; i++) {
+		for (Uint32 i = 2; i < numArgs; i++) {
 			if (args[i].type == TYPE_STRING) {
 				count += args[i].s->length;
 			} else if (args[i].type == TYPE_INTEGER) {
@@ -1330,8 +1416,9 @@ static int SystemInsert(const Value *args, Uint32 numArgs, Value *result)
 		}
 		str->data = newData;
 
-		index = str->length;
-		for (Uint32 i = 1; i < numArgs; i++) {
+		memmove(&str->data[index + count], &str->data[index],
+				str->length - index);
+		for (Uint32 i = 2; i < numArgs; i++) {
 			if (args[i].type == TYPE_STRING) {
 				memcpy(&str->data[index], args[i].s->data,
 						args[i].s->length);
@@ -1348,7 +1435,7 @@ static int SystemInsert(const Value *args, Uint32 numArgs, Value *result)
 				return -1;
 			}
 		}
-		str->length = index;
+		str->length += count;
 	} else {
 		return -1;
 	}
@@ -2318,6 +2405,7 @@ static int ExecuteSystem(const char *call,
 		{ "GetProperty", SystemGetProperty },
 		{ "GetRect", SystemGetRect },
 		{ "GetText", SystemGetText },
+		{ "GetTextExtent", SystemGetTextExtent },
 		{ "GetType", SystemGetType },
 		{ "GetWheel", SystemGetWheel },
 		{ "GetWindowHeight", SystemGetWindowHeight },

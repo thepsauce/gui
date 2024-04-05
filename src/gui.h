@@ -99,6 +99,8 @@ int renderer_SelectFont(Uint32 index);
 int renderer_SetFont(Font *font);
 void renderer_SetTabMultiplier(float multp);
 int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y);
+int renderer_GetTextExtent(Renderer *renderer, const char *text, Uint32 length,
+		Rect *rect);
 
 bool rect_IsEmpty(const Rect *rect);
 bool rect_Intersect(const Rect *r1, const Rect *r2, Rect *rect);
@@ -255,6 +257,7 @@ typedef enum {
 	INSTR_RETURN,
 	INSTR_SET,
 	INSTR_SUBVARIABLE,
+	INSTR_SWITCH,
 	INSTR_THIS,
 	INSTR_TRIGGER,
 	INSTR_VALUE,
@@ -380,6 +383,15 @@ struct instr_set {
 	struct instruction *src;
 };
 
+struct instr_switch {
+	struct instruction *value;
+	struct instruction *instructions;
+	Uint32 numInstructions;
+	Uint32 *jumps;
+	struct instruction *conditions;
+	Uint32 numJumps;
+};
+
 struct instr_trigger {
 	char name[MAX_WORD];
 	struct instruction *args;
@@ -419,6 +431,7 @@ typedef struct instruction {
 		struct instr_return ret;
 		struct instr_set set;
 		struct instr_subvariable subvariable;
+		struct instr_switch switchh;
 		struct instr_trigger trigger;
 		struct instr_value value;
 		struct instr_variable variable;

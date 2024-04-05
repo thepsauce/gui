@@ -13,7 +13,7 @@ hi link PropertyTodo Todo
 
 syn match PropertyIdentifier "\h\k*"
 
-syn keyword PropertyKeywords for if else in from to local const return this trigger break while
+syn keyword PropertyKeywords case for if else in from to local const return this trigger break while switch
 
 hi link PropertyKeywords Statement
 
@@ -43,7 +43,7 @@ syn keyword PropertyValueTypes array bool color function int float string
 syn keyword PropertyValueSpecialTypes event point rect view rgb hsl hsv
 syn keyword PropertyValueKeywords default black white red green blue yellow cyan magenta gray orange purple brown pink olive teal navy false true
 
-syn match PropertyOperators "[!{}[\],.()=<>+-/%]"
+syn match PropertyOperators "[!{}[\],.()=<>+-/%&|]"
 syn match PropertyOperators "\*"
 
 hi link PropertyOperators Operator

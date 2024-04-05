@@ -5,11 +5,29 @@ expr = function {
 	print("(1 + 2) * 3=", l, "\n")
 }
 
+substr = function string s, int from, int to {
+	local l = length(s)
+	if to < from || from >= l {
+		return dup("")
+	}
+	local s2 = dup(s)
+	if to + 1 < l {
+		remove(s2, to + 1, l - 1)
+	}
+	if from > 0 && from < l {
+		remove(s2, 0, from - 1)
+	}
+	return s2
+}
+
 Some:
 	:init = function {}
 	:draw = function {}
 	:event = function event e {}
 	:me = function {
+		local s = "hello"
+		local sub = substr(s, 0, 4)
+		print(sub, "\n")
 		print("yes, it is I, vladimir\n")
 	}
 
@@ -74,6 +92,7 @@ Button::font = int 0
 Button::fontSize = int 16
 Button::mouse = point()
 Button::text = dup("")
+Button::index = int 0
 
 Button::init = function {
 	font = CreateFont("FiraCode-Regular.ttf", fontSize)
@@ -89,7 +108,9 @@ Button::draw = function {
 	FillEllipse(mouse.x, mouse.y, 30, 30)
 
 	SetDrawColor(color magenta)
+	local e = GetTextExtent(text, index)
 	DrawText(text, 0, 100)
+	FillRect(e.x, 100 + e.y, 2, e.h)
 }
 
 Button::event = function event e {
@@ -107,19 +128,43 @@ Button::event = function event e {
 		font = CreateFont("FiraCode-Regular.ttf", fontSize)
 	}
 	if GetType(e) == const EVENT_KEYDOWN {
-		if GetKey(e) == const KEY_RETURN {
-			insert(text, "\n")
-		} else if GetKey(e) == const KEY_TAB {
-			insert(text, "\t")
-		} else if GetKey(e) == const KEY_BACKSPACE {
-			local l = length(text)
-			if l > 0 {
-				remove(text, l - 1)
+		switch GetKey(e) {
+		case const KEY_RETURN
+			insert(text, index, "\n")
+			index = index + 1
+			break
+		case const KEY_TAB
+			insert(text, index, "\t")
+			index = index + 1
+			break
+		case const KEY_BACKSPACE
+			if index > 0 {
+				index = index - 1
+				remove(text, index)
 			}
+			break
+		case const KEY_LEFT
+			if index > 0 {
+				index = index - 1
+			}
+			break
+		case const KEY_RIGHT
+			if index < length(text) {
+				index = index + 1
+			}
+			break
+		case const KEY_HOME
+			index = 0
+			break
+		case const KEY_END
+			index = length(text)
+			break
 		}
 	}
 	if GetType(e) == const EVENT_TEXTINPUT {
-		insert(text, GetText(e))
+		local t = GetText(e)
+		insert(text, index, t)
+		index = index + length(t)
 	}
 }
 

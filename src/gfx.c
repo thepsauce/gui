@@ -682,7 +682,7 @@ int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y)
 				cx += advance;
 				break;
 			case '\t':
-				cx += tabWidth - (x - cx) % tabWidth;
+				cx += tabWidth - (cx - x) % tabWidth;
 				break;
 			case '\n':
 				cx = x;
@@ -739,3 +739,85 @@ int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y)
 	return 0;
 }
 
+int renderer_GetTextExtent(Renderer *renderer, const char *text, Uint32 length,
+		Rect *rect)
+{
+	struct font *font;
+	int advance, tabWidth, height;
+	Sint32 cx, cy;
+	Uint32 index, end;
+	char *data = NULL, *newData;
+	struct word *word;
+
+	font = &cached_fonts[cur_font];
+
+	TTF_GlyphMetrics32(font->font, ' ', NULL, NULL, NULL, NULL, &advance);
+	tabWidth = advance * tab_multiplier;
+	height = TTF_FontHeight(font->font);
+
+	cx = 0;
+	cy = 0;
+	index = 0;
+	while (index < length) {
+		while ((Uint8) text[index] <= ' ' && index != length) {
+			bool b = false;
+
+			switch (text[index]) {
+			case ' ':
+				cx += advance;
+				break;
+			case '\t':
+				cx += tabWidth - cx % tabWidth;
+				break;
+			case '\n':
+				cx = 0;
+				cy += height;
+				break;
+			default:
+				b = true;
+			}
+			if (b) {
+				break;
+			}
+			index++;
+		}
+
+		if (index == length) {
+			break;
+		}
+
+		end = index;
+		while ((Uint8) text[end] > ' ' && end < length) {
+			end++;
+		}
+
+		newData = union_Realloc(union_Default(), data, end - index + 1);
+		if (newData == NULL) {
+			union_Free(union_Default(), data);
+			return -1;
+		}
+		data = newData;
+
+		memcpy(data, text, end - index);
+		data[end - index] = '\0';
+		word = GetCachedWord(data);
+
+		if (word == NULL) {
+			word = CacheWord(renderer, data);
+			if (word == NULL) {
+				union_Free(union_Default(), data);
+				return -1;
+			}
+		}
+		cx += word->width;
+		index = end;
+	}
+	if (data != NULL) {
+		union_Free(union_Default(), data);
+	}
+	rect->x = cx;
+	rect->y = cy;
+	rect->w = 0;
+	rect->h = height;
+	return 0;
+}
