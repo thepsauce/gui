@@ -656,7 +656,7 @@ int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y)
 {
 	struct font *font;
 	Uint8 r, g, b, a;
-	int advance, tabWidth, height;
+	int advance, tabWidth, lineSkip;
 	Sint32 cx, cy;
 	const char *end;
 	char *data = NULL, *newData;
@@ -669,12 +669,12 @@ int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y)
 
 	TTF_GlyphMetrics32(font->font, ' ', NULL, NULL, NULL, NULL, &advance);
 	tabWidth = advance * tab_multiplier;
-	height = TTF_FontHeight(font->font);
+	lineSkip = TTF_FontLineSkip(font->font);
 
 	cx = x;
 	cy = y;
 	while (*text != '\0') {
-		while (*text <= ' ') {
+		while ((Uint8) *text <= ' ') {
 			bool b = false;
 
 			switch (*text) {
@@ -686,7 +686,7 @@ int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y)
 				break;
 			case '\n':
 				cx = x;
-				cy += height;
+				cy += lineSkip;
 				break;
 			default:
 				b = true;
@@ -743,7 +743,7 @@ int renderer_GetTextExtent(Renderer *renderer, const char *text, Uint32 length,
 		Rect *rect)
 {
 	struct font *font;
-	int advance, tabWidth, height;
+	int advance, tabWidth, lineSkip;
 	Sint32 cx, cy;
 	Uint32 index, end;
 	char *data = NULL, *newData;
@@ -753,7 +753,7 @@ int renderer_GetTextExtent(Renderer *renderer, const char *text, Uint32 length,
 
 	TTF_GlyphMetrics32(font->font, ' ', NULL, NULL, NULL, NULL, &advance);
 	tabWidth = advance * tab_multiplier;
-	height = TTF_FontHeight(font->font);
+	lineSkip = TTF_FontLineSkip(font->font);
 
 	cx = 0;
 	cy = 0;
@@ -771,7 +771,7 @@ int renderer_GetTextExtent(Renderer *renderer, const char *text, Uint32 length,
 				break;
 			case '\n':
 				cx = 0;
-				cy += height;
+				cy += lineSkip;
 				break;
 			default:
 				b = true;
@@ -798,7 +798,7 @@ int renderer_GetTextExtent(Renderer *renderer, const char *text, Uint32 length,
 		}
 		data = newData;
 
-		memcpy(data, text, end - index);
+		memcpy(data, &text[index], end - index);
 		data[end - index] = '\0';
 		word = GetCachedWord(data);
 
@@ -818,6 +818,6 @@ int renderer_GetTextExtent(Renderer *renderer, const char *text, Uint32 length,
 	rect->x = cx;
 	rect->y = cy;
 	rect->w = 0;
-	rect->h = height;
+	rect->h = lineSkip;
 	return 0;
 }

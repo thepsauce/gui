@@ -931,6 +931,9 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 				break;
 			}
 			const int r = ExecuteInstruction(instr->whilee.iter, result);
+			if (r == 2) {
+				return 0;
+			}
 			if (r != 0) {
 				return r;
 			}
@@ -2349,6 +2352,75 @@ static int SystemGetWheel(const Value *args, Uint32 numArgs, Value *result)
 	return 0;
 }
 
+static int SystemSetTextInputRect(const Value *args, Uint32 numArgs,
+		Value *result)
+{
+	Rect r;
+
+	if (args_GetRect(args, numArgs, &r) < 0) {
+		return -1;
+	}
+	SDL_SetTextInputRect(&r);
+	(void) result;
+	return 0;
+}
+
+static int SystemUtf8Next(const Value *args, Uint32 numArgs, Value *result)
+{
+	Value val;
+	struct value_string *str;
+	Uint32 n;
+
+	if (numArgs != 2 || args[0].type != TYPE_STRING) {
+		return -1;
+	}
+	if (value_Cast(&args[1], TYPE_INTEGER, &val) < 0) {
+		return -1;
+	}
+	str = args[0].s;
+	if (val.i < 0 || val.i > str->length) {
+		return -1;
+	}
+
+	result->type = TYPE_INTEGER;
+	if (val.i != str->length) {
+		if (!(str->data[val.i] & 0x80)) {
+			result->i = val.i + 1;
+			return 0;
+		}
+		n = str->length - val.i;
+		while (val.i++, --n && (str->data[val.i] & 0xc0) == 0x80) {
+		}
+	}
+	result->i = val.i;
+	return 0;
+}
+
+static int SystemUtf8Prev(const Value *args, Uint32 numArgs, Value *result)
+{
+	Value val;
+	struct value_string *str;
+
+	if (numArgs != 2 || args[0].type != TYPE_STRING) {
+		return -1;
+	}
+	if (value_Cast(&args[1], TYPE_INTEGER, &val) < 0) {
+		return -1;
+	}
+	str = args[0].s;
+	if (val.i < 0 || val.i > str->length) {
+		return -1;
+	}
+	while (val.i > 0 && (str->data[--val.i] & 0xc0) == 0x80) {
+		if (val.i > 0 && !(str->data[val.i - 1] & 0x80)) {
+			break;
+		}
+	}
+	result->type = TYPE_INTEGER;
+	result->i = val.i;
+	return 0;
+}
+
 static int ExecuteSystem(const char *call,
 		Instruction *args, Uint32 numArgs, Value *result)
 {
@@ -2415,6 +2487,10 @@ static int ExecuteSystem(const char *call,
 		{ "SetParent", SystemSetParent },
 		{ "SetProperty", SystemSetProperty },
 		{ "SetRect", SystemSetRect },
+		{ "SetTextInputRect", SystemSetTextInputRect },
+
+		{ "Utf8Next", SystemUtf8Next },
+		{ "Utf8Prev", SystemUtf8Prev },
 	};
 
 	const struct system_function *sys = NULL;

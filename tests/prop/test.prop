@@ -101,7 +101,7 @@ Button::init = function {
 Button::draw = function {
 	SetFont(font)
 	SetDrawColor(color green)
-	DrawText("Hello there\nWhat is this?\nおす\n", 30, 30)
+	;DrawText("Hello there\nWhat is this?\nおす\n", 30, 30);
 
 	SetDrawColor(hsl(200, 1, 0.4))
 	DrawEllipse(80, 80, 30, 30)
@@ -111,6 +111,9 @@ Button::draw = function {
 	local e = GetTextExtent(text, index)
 	DrawText(text, 0, 100)
 	FillRect(e.x, 100 + e.y, 2, e.h)
+	e.y = e.y + e.h
+	; this is so weird ;
+	SetTextInputRect(e)
 }
 
 Button::event = function event e {
@@ -138,26 +141,40 @@ Button::event = function event e {
 			index = index + 1
 			break
 		case const KEY_BACKSPACE
-			if index > 0 {
-				index = index - 1
-				remove(text, index)
+			local p = Utf8Prev(text, index)
+			if p != index {
+				remove(text, p, index - 1)
+				index = p
+			}
+			break
+		case const KEY_DELETE
+			local p = Utf8Next(text, index)
+			if p != index {
+				remove(text, index, p - 1)
 			}
 			break
 		case const KEY_LEFT
-			if index > 0 {
+			index = Utf8Prev(text, index)
+			break
+		case const KEY_RIGHT
+			index = Utf8Next(text, index)
+			break
+		case const KEY_HOME
+			while index > 0 {
+				if get(text, index - 1) == '\n' {
+					break
+				}
 				index = index - 1
 			}
 			break
-		case const KEY_RIGHT
-			if index < length(text) {
+		case const KEY_END
+			local l = length(text)
+			while index < l {
+				if get(text, index) == '\n' {
+					break
+				}
 				index = index + 1
 			}
-			break
-		case const KEY_HOME
-			index = 0
-			break
-		case const KEY_END
-			index = length(text)
 			break
 		}
 	}
