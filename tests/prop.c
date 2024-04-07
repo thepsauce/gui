@@ -27,7 +27,7 @@ int main(void)
 	trigger_Install(&trigger);
 
 	fp = fopen("tests/prop/test.prop", "r");
-	if (prop_Parse(fp, &uni, &wrappers, &numWrappers) == 0) {
+	if (prop_ParseFile(fp, &uni, &wrappers, &numWrappers) == 0) {
 		if (environment_Digest(wrappers, numWrappers) == 0) {
 		} else {
 			fprintf(stdout, "could not digest\n");

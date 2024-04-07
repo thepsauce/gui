@@ -1,20 +1,5 @@
 #include "gui.h"
 
-int BaseProc(View *view, event_t type, EventInfo *info)
-{
-	(void) view;
-	(void) type;
-	(void) info;
-	return 0;
-}
-
-View base_view;
-
-View *view_Default(void)
-{
-	return &base_view;
-}
-
 View *view_Create(const char *labelName, const Rect *rect)
 {
 	Label *label;
@@ -67,10 +52,8 @@ View *view_Create(const char *labelName, const Rect *rect)
 int view_SendRecursive(View *view, event_t type, EventInfo *info)
 {
 	for (; view != NULL; view = view->next) {
-		if (view->child != NULL) {
-			view_SendRecursive(view->child, type, info);
-		}
-		/* TODO: keep this? */
+		view_SendRecursive(view->child, type, info);
+		/* TODO: keep this if? */
 		if (view->label != NULL) {
 			view->label->proc(view, type, info);
 		}

@@ -73,15 +73,15 @@ void HslToHsv(const hsl_t *hsl, hsv_t *hsv);
 void HslToRgb(const hsl_t *hsl, rgb_t *rgb);
 
 Renderer *renderer_Default(void);
-int renderer_SetDrawColor(Renderer *renderer, Uint32 color);
-int renderer_SetDrawColorRGB(Renderer *renderer, Uint8 a,
+int renderer_SetDrawColor(Uint32 color);
+int renderer_SetDrawColorRGB(Uint8 a,
 		Uint8 r, Uint8 g, Uint8 b);
-int renderer_DrawRect(Renderer *renderer, Rect *rect);
-int renderer_FillRect(Renderer *renderer, Rect *rect);
-int renderer_DrawLine(Renderer *renderer, Sint32 x1, Sint32 y1,
+int renderer_DrawRect(Rect *rect);
+int renderer_FillRect(Rect *rect);
+int renderer_DrawLine(Sint32 x1, Sint32 y1,
 		Sint32 x2, Sint32 y2);
-int renderer_DrawEllipse(Renderer *renderer, Sint32 x, Sint32 y, Sint32 rx, Sint32 ry);
-int renderer_FillEllipse(Renderer *renderer, Sint32 x, Sint32 y, Sint32 rx, Sint32 ry);
+int renderer_DrawEllipse(Sint32 x, Sint32 y, Sint32 rx, Sint32 ry);
+int renderer_FillEllipse(Sint32 x, Sint32 y, Sint32 rx, Sint32 ry);
 
 struct font {
 	Font *font;
@@ -98,9 +98,11 @@ Font *renderer_GetFont(Uint32 index);
 int renderer_SelectFont(Uint32 index);
 int renderer_SetFont(Font *font);
 void renderer_SetTabMultiplier(float multp);
-int renderer_DrawText(Renderer *renderer, const char *text, Sint32 x, Sint32 y);
-int renderer_GetTextExtent(Renderer *renderer, const char *text, Uint32 length,
+int renderer_DrawText(const char *text, Uint32 length,
 		Rect *rect);
+int renderer_GetTextExtent(const char *text, Uint32 length,
+		Rect *rect);
+int renderer_LineSkip(void);
 
 bool rect_IsEmpty(const Rect *rect);
 bool rect_Intersect(const Rect *r1, const Rect *r2, Rect *rect);
@@ -471,8 +473,11 @@ typedef struct label {
 	struct label *next;
 } Label;
 
-int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
+int prop_ParseString(const char *str, Union *uni, RawWrapper **pWrappers,
 		Uint32 *pNumWrappers);
+int prop_ParseFile(FILE *file, Union *uni, RawWrapper **pWrappers,
+		Uint32 *pNumWrappers);
+Instruction *parse_Expression(const char *str, Uint32 length);
 
 int function_Execute(Function *func, Instruction *args, Uint32 numArgs,
 		Value *result);

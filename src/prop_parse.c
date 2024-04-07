@@ -5,6 +5,9 @@
 struct parser {
 	Union uni;
 	FILE *file;
+	const char *source;
+	Uint32 sourcePointer;
+	Uint32 sourceLength;
 	/* circular buffer */
 	char buffer[PARSER_BUFFER];
 	Uint32 iRead, iWrite;
@@ -67,6 +70,20 @@ static void Refresh(struct parser *parser)
 
 static int NextChar(struct parser *parser)
 {
+	if (parser->file == NULL) {
+		if (parser->sourcePointer == parser->sourceLength) {
+			parser->c = EOF;
+			return EOF;
+		}
+		parser->c = parser->source[parser->sourcePointer++];
+		if (parser->c == '\n') {
+			parser->line++;
+			parser->column = 0;
+		} else {
+			parser->column++;
+		}
+		return parser->c;
+	}
 	Refresh(parser);
 	if (parser->iRead == parser->iWrite) {
 		parser->c = EOF;
@@ -103,12 +120,26 @@ static Uint32 LookAhead(struct parser *parser, char *buf, Uint32 nBuf)
 
 	SkipSpace(parser);
 
-	if (nBuf == 0 || parser->c == EOF ||
-			nBuf >= sizeof(parser->buffer) / 2) {
+	if (nBuf == 0 || parser->c == EOF) {
 		return 0;
 	}
 
 	buf[0] = parser->c;
+
+	if (parser->file == NULL) {
+		for (l = 1, i = parser->sourcePointer; l < nBuf; l++) {
+			if (i == parser->sourceLength) {
+				break;
+			}
+			buf[l] = parser->source[i++];
+		}
+		return l;
+	}
+
+	if (nBuf >= sizeof(parser->buffer) / 2) {
+		return 0;
+	}
+
 	for (l = 1, i = parser->iRead; l < nBuf; l++) {
 		if (i == parser->iWrite) {
 			break;
@@ -1794,7 +1825,129 @@ static inline Uint32 FindWrapper(const RawWrapper *wrappers,
 	return UINT32_MAX;
 }
 
-int prop_Parse(FILE *file, Union *uni, RawWrapper **pWrappers,
+int prop_ParseString(const char *str, Union *uni, RawWrapper **pWrappers,
+		Uint32 *pNumWrappers)
+{
+	Union *defUni;
+	Uint32 numPtrs;
+	struct parser parser;
+	RawWrapper *wrappers, *newWrappers;
+	Uint32 numWrappers, curWrapper;
+
+	/* this is for convenience:
+	 * all parser functions allocate memory using the default union
+	 * but all has to be deallocated when an error occurs which is
+	 * annoying so that is why we just store the starting point
+	 * of all the pointers we allocate
+	 */
+	defUni = union_Default();
+	numPtrs = defUni->numPointers;
+
+	memset(&parser, 0, sizeof(parser));
+
+	union_Init(&parser.uni, SIZE_MAX);
+
+	wrappers = union_Alloc(&parser.uni, sizeof(*wrappers));
+	if (wrappers == NULL) {
+		return -1;
+	}
+	curWrapper = 0;
+	numWrappers = 1;
+	memset(wrappers, 0, sizeof(*wrappers));
+
+	parser.source = str;
+	parser.sourceLength = strlen(str);
+
+	NextChar(&parser);
+
+	while (SkipSpace(&parser), parser.c != EOF) {
+		if (parser.c == ':') {
+			if (numWrappers == 1) {
+				goto fail;
+			}
+			if (ReadProperty(&parser) < 0) {
+				goto fail;
+			}
+			if (wrapper_AddProperty(&parser.uni,
+						&wrappers[numWrappers - 1],
+						&parser.property) < 0) {
+				goto fail;
+			}
+			continue;
+		}
+
+		if (ReadWord(&parser) < 0) {
+			goto fail;
+		}
+		if (GetKeyword(parser.word) != NULL) {
+			goto fail;
+		}
+		SkipSpace(&parser);
+		if (parser.c == ':') {
+			NextChar(&parser);
+			curWrapper = FindWrapper(wrappers, numWrappers,
+					parser.word);
+			if (curWrapper != UINT32_MAX) {
+				continue;
+			}
+
+			newWrappers = union_Realloc(&parser.uni, wrappers,
+					sizeof(*wrappers) * (numWrappers + 1));
+			if (newWrappers == NULL) {
+				goto fail;
+			}
+			wrappers = newWrappers;
+			strcpy(wrappers[numWrappers].label, parser.word);
+			wrappers[numWrappers].properties = NULL;
+			wrappers[numWrappers].numProperties = 0;
+			curWrapper = numWrappers;
+			numWrappers++;
+		} else if (parser.c == '=') {
+			strcpy(parser.property.name, parser.word);
+			NextChar(&parser); /* skip '=' */
+			SkipSpace(&parser);
+			if (ReadExpression(&parser, 0) < 0) {
+				goto fail;
+			}
+			parser.property.instruction = parser.instruction;
+			if (wrapper_AddProperty(&parser.uni,
+						&wrappers[0],
+						&parser.property) < 0) {
+				goto fail;
+			}
+			continue;
+		}
+	}
+	*uni = parser.uni;
+	*pWrappers = wrappers;
+	*pNumWrappers = numWrappers;
+	return 0;
+
+fail:
+	union_FreeAll(&parser.uni);
+	union_Trim(defUni, numPtrs);
+	fprintf(stderr, "parser error at line %ld\n> ", parser.line + 1);
+	if (parser.column > 0) {
+		for (int i = 0; i < parser.column - 1; i++) {
+			fputc(parser.buffer[i], stderr);
+		}
+		fprintf(stderr, "\033[31m");
+		fputc(parser.buffer[parser.column], stderr);
+		fprintf(stderr, "\033[0m");
+		NextChar(&parser);
+	}
+	for (int i = 0; i < 20; i++) {
+		const int c = NextChar(&parser);
+		if (c == EOF || c == '\n') {
+			break;
+		}
+		fputc(c, stderr);
+	}
+	fputc('\n', stderr);
+	return -1;
+}
+
+int prop_ParseFile(FILE *file, Union *uni, RawWrapper **pWrappers,
 		Uint32 *pNumWrappers)
 {
 	Union *defUni;
@@ -1942,4 +2095,25 @@ fail:
 	}
 	fputc('\n', stderr);
 	return -1;
+}
+
+Instruction *parse_Expression(const char *str, Uint32 length)
+{
+	struct parser parser;
+	Instruction *instr;
+
+	memset(&parser, 0, sizeof(parser));
+	parser.source = str;
+	parser.sourceLength = length;
+	NextChar(&parser);
+	SkipSpace(&parser);
+	if (ReadExpression(&parser, 0) < 0) {
+		return NULL;
+	}
+	instr = union_Alloc(union_Default(), sizeof(*instr));
+	if (instr == NULL) {
+		return NULL;
+	}
+	*instr = parser.instruction;
+	return instr;
 }
