@@ -664,6 +664,10 @@ int renderer_DrawText(const char *text, Uint32 length,
 	Rect textRect;
 	Uint32 index, end;
 
+	if (num_fonts == 0) {
+		return 1;
+	}
+
 	font = &cached_fonts[cur_font];
 
 	SDL_GetRenderDrawColor(renderer_Default(), &r, &g, &b, &a);
@@ -752,6 +756,10 @@ int renderer_GetTextExtent(const char *text, Uint32 length,
 	Uint32 index, end;
 	char *data = NULL, *newData;
 	struct word *word;
+
+	if (num_fonts == 0) {
+		return 1;
+	}
 
 	font = &cached_fonts[cur_font];
 

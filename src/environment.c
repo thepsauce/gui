@@ -67,6 +67,7 @@ static void term_Delete(struct term *term, Uint32 from, Uint32 to)
 	buf = term->lines[term->line];
 	memmove(&buf[from], &buf[to], term->lenLine - to);
 	term->lenLine -= to - from;
+	buf[term->lenLine] = '\0';
 }
 
 static int ExecuteInstruction(Instruction *instr, Value *value);
@@ -108,6 +109,7 @@ int BaseProc(View *view, event_t type, EventInfo *info)
 	Instruction *instr;
 	Uint32 index;
 	Value val;
+	int lineSkip;
 
 	(void) view;
 
@@ -120,15 +122,18 @@ int BaseProc(View *view, event_t type, EventInfo *info)
 
 	switch (type) {
 	case EVENT_PAINT:
+		renderer_SetDrawColor(0xffffffff);
 		r.x = 0;
 		r.y = 0;
+		lineSkip = renderer_LineSkip();
 		for (Uint32 i = 0; i < term.numLines; i++) {
 			if (term.lines[i] == NULL) {
+				r.y += lineSkip;
 				continue;
 			}
 			renderer_DrawText(term.lines[i],
 					strlen(term.lines[i]), &r);
-			r.y += r.h;
+			r.y += lineSkip;
 		}
 		renderer_GetTextExtent(term.lines[term.line],
 				term.column, &ext);
@@ -202,7 +207,8 @@ static struct environment {
 	Uint32 numStack;
 } environment = {
 	.uni = &environment_union,
-	.label = &global_label
+	.label = &global_label,
+	.cur = &global_label,
 };
 
 struct trigger *installed_triggers;

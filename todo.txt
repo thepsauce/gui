@@ -8,3 +8,5 @@ not for deploying, just for debugging and testing purposes.
 
 Property language needs to be reworked to eliminate all memory leaks (there are
 everywhere), implement garbage collection (removal of unused pointers)
+Check all return -1 statements in environment.c and prop_parse.c and return and
+error code/error message and stack trace.
