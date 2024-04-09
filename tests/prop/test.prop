@@ -165,7 +165,7 @@ Button::event = function event e {
 				index = index - 1
 			}
 			break
-		case const KEY_END
+		case const KEY_ED
 			local l = length(text)
 			while index < l {
 				if get(text, index) == '\n' {

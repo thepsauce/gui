@@ -4,16 +4,37 @@
 
 struct parser {
 	Union uni;
+
+	char error[256];
+	struct where {
+		char name[32];
+		long line;
+		Uint32 column;
+	} where[128];
+	Uint32 numWhere;
+
+	struct last_action {
+		long line;
+		Uint32 column;
+		Uint32 sol;
+		Uint32 count;
+	} lastAction;
+
+	/* file with circular buffer */
 	FILE *file;
+	char buffer[PARSER_BUFFER];
+	Uint32 iRead, iWrite;
+
+	/* reading from raw string */
 	const char *source;
 	Uint32 sourcePointer;
 	Uint32 sourceLength;
-	/* circular buffer */
-	char buffer[PARSER_BUFFER];
-	Uint32 iRead, iWrite;
+
 	long line;
-	int column;
+	Uint32 column;
 	int c;
+	Uint32 sol; /* start of line */
+
 	char word[MAX_WORD];
 	int nWord;
 	Value value;
@@ -22,6 +43,52 @@ struct parser {
 	Instruction *instructions;
 	Uint32 numInstructions;
 };
+
+static void parser_PrintError(struct parser *parser, FILE *fp)
+{
+	if (parser->numWhere == 0) {
+		return;
+	}
+	fprintf(fp, "%s in %s\n", parser->error,
+			parser->where[parser->numWhere - 1].name);
+	if (parser->numWhere > 1) {
+		fprintf(fp, "while parsing...\n");
+		for (Uint32 i = parser->numWhere - 1; i > 0; ) {
+			i--;
+			fprintf(fp, ". %s\n", parser->where[i].name);
+		}
+	}
+}
+
+static int parser_Error(struct parser *parser, const char *error)
+{
+	strncpy(parser->error, error, sizeof(parser->error));
+	/* always returns -1! */
+	return -1;
+}
+
+static int parser_Enter(struct parser *parser, const char *name)
+{
+	struct where *where;
+
+	if (parser->numWhere == ARRLEN(parser->where)) {
+		return parser_Error(parser, "too nested");
+	}
+	where = &parser->where[parser->numWhere++];
+	strncpy(where->name, name, sizeof(where->name));
+	where->line = parser->line;
+	where->column = parser->column;
+	return 0;
+}
+
+static int parser_Leave(struct parser *parser)
+{
+	if (parser->numWhere == 0) {
+		return -1;
+	}
+	parser->numWhere--;
+	return 0;
+}
 
 static void Refresh(struct parser *parser)
 {
@@ -79,6 +146,7 @@ static int NextChar(struct parser *parser)
 		if (parser->c == '\n') {
 			parser->line++;
 			parser->column = 0;
+			parser->sol = parser->iRead;
 		} else {
 			parser->column++;
 		}
@@ -89,11 +157,16 @@ static int NextChar(struct parser *parser)
 		parser->c = EOF;
 		return EOF;
 	}
+	parser->lastAction.line = parser->line;
+	parser->lastAction.column = parser->column;
+	parser->lastAction.count = 1;
+	parser->lastAction.sol = parser->sol;
 	parser->c = parser->buffer[parser->iRead++];
 	parser->iRead %= sizeof(parser->buffer);
 	if (parser->c == '\n') {
 		parser->line++;
 		parser->column = 0;
+		parser->sol = parser->iRead;
 	} else {
 		parser->column++;
 	}
@@ -154,20 +227,56 @@ static int ReadWord(struct parser *parser)
 {
 	parser->nWord = 0;
 	if (parser->c != '_' && !isalpha(parser->c)) {
-		return -1;
+		return parser_Error(parser, "expected word");
 	}
-	do {
-		if (parser->nWord + 1 == MAX_WORD) {
-			return -1;
-		}
-		parser->word[parser->nWord++] = parser->c;
-		NextChar(parser);
-	} while (parser->c == '_' || isalnum(parser->c));
+
+	parser->lastAction.line = parser->line;
+	parser->lastAction.column = parser->column - 1;
+	parser->lastAction.sol = parser->sol;
+
+	if (parser->file == NULL) {
+		do {
+			if (parser->nWord + 1 == MAX_WORD) {
+				return parser_Error(parser, "word too long");
+			}
+			parser->word[parser->nWord++] = parser->c;
+			if (parser->sourcePointer == parser->sourceLength) {
+				parser->c = EOF;
+				return EOF;
+			}
+			parser->c = parser->source[parser->sourcePointer++];
+		} while (parser->c == '_' || isalnum(parser->c));
+	} else {
+		Refresh(parser);
+
+		do {
+			if (parser->nWord + 1 == MAX_WORD) {
+				return parser_Error(parser, "word too long");
+			}
+			parser->word[parser->nWord++] = parser->c;
+			if (parser->iRead == parser->iWrite) {
+				parser->c = EOF;
+				break;
+			}
+			parser->c = parser->buffer[parser->iRead++];
+			parser->iRead %= sizeof(parser->buffer);
+		} while (parser->c == '_' || isalnum(parser->c));
+	}
+
+	if (parser->c == '\n') {
+		parser->line++;
+		parser->column = 0;
+		parser->sol = parser->file == NULL ? parser->sourcePointer :
+			parser->iRead;
+	} else {
+		parser->column += parser->nWord;
+	}
 	parser->word[parser->nWord] = '\0';
+	parser->lastAction.count = parser->nWord;
 	return 0;
 }
 
-static int HexToInt(char ch)
+static int HexToInt(struct parser *parser, char ch)
 {
 	if (isdigit(ch)) {
 		return ch - '0';
@@ -175,7 +284,7 @@ static int HexToInt(char ch)
 	if (isalpha(ch)) {
 		return ch >= 'a' ? ch - 'a' + 0xa : ch - 'A' + 0xA;
 	}
-	return -1;
+	return parser_Error(parser, "expected hex digit");
 }
 
 static type_t CheckType(struct parser *parser)
@@ -285,6 +394,10 @@ static int ReadIntOrFloat(struct parser *parser, struct int_or_float *iof)
 	Uint32 nFront = 0, nBack = 0;
 	Sint64 exponent;
 
+	if (parser_Enter(parser, "int or float") < 0) {
+		return -1;
+	}
+
 	iof->radix = 10;
 	iof->front = 0;
 	iof->back = 0;
@@ -301,6 +414,9 @@ static int ReadIntOrFloat(struct parser *parser, struct int_or_float *iof)
 	}
 
 	if (parser->c == '\'') {
+		if (parser_Enter(parser, "char") < 0) {
+			return -1;
+		}
 		NextChar(parser);
 		if (parser->c == '\\') {
 			NextChar(parser);
@@ -315,11 +431,11 @@ static int ReadIntOrFloat(struct parser *parser, struct int_or_float *iof)
 			case 'x': {
 				int d1, d2;
 
-				d1 = HexToInt(NextChar(parser));
+				d1 = HexToInt(parser, NextChar(parser));
 				if (d1 < 0) {
 					return -1;
 				}
-				d2 = HexToInt(NextChar(parser));
+				d2 = HexToInt(parser, NextChar(parser));
 				if (d2 < 0) {
 					return -1;
 				}
@@ -334,11 +450,13 @@ static int ReadIntOrFloat(struct parser *parser, struct int_or_float *iof)
 		}
 		NextChar(parser);
 		if (parser->c != '\'') {
-			return -1;
+			return parser_Error(parser, "expected '");
 		}
 		NextChar(parser);
 		iof->front = c;
-		return 0;
+		/* double leave */
+		parser_Leave(parser);
+		return parser_Leave(parser);
 	}
 
 	if (parser->c == '0') {
@@ -386,10 +504,12 @@ static int ReadIntOrFloat(struct parser *parser, struct int_or_float *iof)
 			back += c;
 			nBack++;
 		}
+	} else if (nFront == 0) {
+		return parser_Error(parser, "expected number");
 	}
 
 	if (nFront == 0 && nBack == 0) {
-		return -1;
+		return parser_Error(parser, "missing digits before/after dot");
 	}
 
 	exponent = 0;
@@ -418,7 +538,7 @@ static int ReadIntOrFloat(struct parser *parser, struct int_or_float *iof)
 	iof->bShift = exponent - nBack;
 	iof->front = front;
 	iof->back = back;
-	return 0;
+	return parser_Leave(parser);
 }
 
 static int ReadArray(struct parser *parser)
@@ -427,13 +547,17 @@ static int ReadArray(struct parser *parser)
 	Value *values = NULL, *newValues;
 	Uint32 numValues = 0;
 
-	arr = union_Alloc(union_Default(), sizeof(*arr));
-	if (arr == NULL) {
+	if (parser_Enter(parser, "array") < 0) {
 		return -1;
 	}
 
+	arr = union_Alloc(union_Default(), sizeof(*arr));
+	if (arr == NULL) {
+		return parser_Error(parser, "memory");
+	}
+
 	if (parser->c != '[') {
-		return -1;
+		return parser_Error(parser, "expected [");
 	}
 	NextChar(parser);
 	SkipSpace(parser);
@@ -444,7 +568,7 @@ static int ReadArray(struct parser *parser)
 		newValues = union_Realloc(union_Default(), values,
 				sizeof(*values) * (numValues + 1));
 		if (newValues == NULL) {
-			return -1;
+			return parser_Error(parser, "memory");
 		}
 		values = newValues;
 		values[numValues++] = parser->value;
@@ -456,29 +580,34 @@ static int ReadArray(struct parser *parser)
 		SkipSpace(parser);
 	}
 	if (parser->c != ']') {
-		return -1;
+		return parser_Error(parser, "expected ]");
 	}
 	NextChar(parser); /* skip ']' */
 	arr->values = values;
 	arr->numValues = numValues;
 	parser->value.a = arr;
-	return 0;
+
+	return parser_Leave(parser);
 }
 
 static int ReadBool(struct parser *parser)
 {
-	if (ReadWord(parser) < 0) {
+	if (parser_Enter(parser, "bool") < 0) {
 		return -1;
+	}
+
+	if (ReadWord(parser) < 0) {
+		return parser_Error(parser, "expected true or false");
 	}
 	if (strcmp(parser->word, "true") == 0) {
 		parser->value.b = true;
-		return 0;
+		return parser_Leave(parser);
 	}
 	if (strcmp(parser->word, "false") == 0) {
 		parser->value.b = false;
-		return 0;
+		return parser_Leave(parser);
 	}
-	return -1;
+	return parser_Error(parser, "expected true or false");
 }
 
 static int ReadColor(struct parser *parser)
@@ -505,6 +634,10 @@ static int ReadColor(struct parser *parser)
 		{ "navy", 0xff000080 }
 	};
 
+	if (parser_Enter(parser, "color") < 0) {
+		return -1;
+	}
+
 	if (isalpha(parser->c)) {
 		if (ReadWord(parser) < 0) {
 			return -1;
@@ -515,7 +648,7 @@ static int ReadColor(struct parser *parser)
 				return 0;
 			}
 		}
-		return -1;
+		return parser_Error(parser, "invalid color");
 	} else {
 		struct int_or_float iof;
 
@@ -524,12 +657,16 @@ static int ReadColor(struct parser *parser)
 		}
 		IntToRgb(iof_AsInt(&iof), &parser->value.c);
 	}
-	return 0;
+	return parser_Leave(parser);
 }
 
 static int ReadKeyDown(struct parser *parser)
 {
 	struct key_info ki;
+
+	if (parser_Enter(parser, "keydown") < 0) {
+		return -1;
+	}
 
 	/* TODO: handle variations */
 	ki.state = 0;
@@ -552,6 +689,11 @@ static int ReadEvent(struct parser *parser)
 		{ "keydown", EVENT_KEYDOWN, ReadKeyDown },
 		/* TODO: */
 	};
+
+	if (parser_Enter(parser, "event") < 0) {
+		return -1;
+	}
+
 	if (ReadWord(parser) < 0) {
 		return -1;
 	}
@@ -563,7 +705,7 @@ static int ReadEvent(struct parser *parser)
 			return 0;
 		}
 	}
-	return -1;
+	return parser_Error(parser, "invalid event");
 }
 
 static int ReadFloat(struct parser *parser)
@@ -584,8 +726,12 @@ static int ReadBody(struct parser *parser)
 	Instruction *instructions = NULL, *newInstructions;
 	Uint32 numInstructions = 0;
 
-	if (parser->c != '{') {
+	if (parser_Enter(parser, "body") < 0) {
 		return -1;
+	}
+
+	if (parser->c != '{') {
+		return parser_Error(parser, "expected {");
 	}
 	NextChar(parser); /* skip '{' */
 	while (SkipSpace(parser), parser->c != '}') {
@@ -595,7 +741,7 @@ static int ReadBody(struct parser *parser)
 		newInstructions = union_Realloc(union_Default(), instructions,
 				sizeof(*instructions) * (numInstructions + 1));
 		if (newInstructions == NULL) {
-			return -1;
+			return parser_Error(parser, "memory");
 		}
 		instructions = newInstructions;
 		instructions[numInstructions++] = parser->instruction;
@@ -603,7 +749,7 @@ static int ReadBody(struct parser *parser)
 	NextChar(parser); /* skip '}' */
 	parser->instructions = instructions;
 	parser->numInstructions = numInstructions;
-	return 0;
+	return parser_Leave(parser);
 }
 
 static int ReadFunction(struct parser *parser)
@@ -613,9 +759,13 @@ static int ReadFunction(struct parser *parser)
 	Parameter p, *params = NULL, *newParams;
 	Uint32 numParams = 0;
 
+	if (parser_Enter(parser, "function") < 0) {
+		return -1;
+	}
+
 	func = union_Alloc(union_Default(), sizeof(*func));
 	if (func == NULL) {
-		return -1;
+		return parser_Error(parser, "memory");
 	}
 
 	/* read parameters */
@@ -626,7 +776,8 @@ static int ReadFunction(struct parser *parser)
 		}
 		type = CheckType(parser);
 		if (type == TYPE_NULL) {
-			return -1;
+			return parser_Error(parser,
+					"expected parameter type name or {");
 		}
 		/* parameter name */
 		SkipSpace(parser);
@@ -637,7 +788,7 @@ static int ReadFunction(struct parser *parser)
 		newParams = union_Realloc(union_Default(), params,
 				sizeof(*params) * (numParams + 1));
 		if (newParams == NULL) {
-			return -1;
+			return parser_Error(parser, "memory");
 		}
 		params = newParams;
 		p.type = type;
@@ -645,7 +796,7 @@ static int ReadFunction(struct parser *parser)
 		params[numParams++] = p;
 		SkipSpace(parser);
 		if (parser->c != ',' && parser->c != '{') {
-			return -1;
+			return parser_Error(parser, "expected , or {");
 		}
 		if (parser->c == ',') {
 			NextChar(parser); /* skip ',' */
@@ -661,7 +812,7 @@ static int ReadFunction(struct parser *parser)
 	func->instructions = parser->instructions;
 	func->numInstructions = parser->numInstructions;
 	parser->value.func = func;
-	return 0;
+	return parser_Leave(parser);
 }
 
 static int ReadInt(struct parser *parser)
@@ -680,16 +831,20 @@ static int ReadString(struct parser *parser)
 	struct value_string *s;
 	char *newData;
 
+	if (parser_Enter(parser, "string") < 0) {
+		return -1;
+	}
+
 	s = union_Alloc(union_Default(), sizeof(*s));
 	if (s == NULL) {
-		return -1;
+		return parser_Error(parser, "memory");
 	}
 
 	s->data = NULL;
 	s->length = 0;
 
 	if (parser->c != '\"') {
-		return -1;
+		return parser_Error(parser, "expected \"");
 	}
 	while (NextChar(parser) != EOF) {
 		int c;
@@ -711,11 +866,11 @@ static int ReadString(struct parser *parser)
 			case 'x': {
 				int d1, d2;
 
-				d1 = HexToInt(NextChar(parser));
+				d1 = HexToInt(parser, NextChar(parser));
 				if (d1 < 0) {
 					return -1;
 				}
-				d2 = HexToInt(NextChar(parser));
+				d2 = HexToInt(parser, NextChar(parser));
 				if (d2 < 0) {
 					return -1;
 				}
@@ -730,14 +885,14 @@ static int ReadString(struct parser *parser)
 		}
 		newData = union_Realloc(union_Default(), s->data, s->length + 1);
 		if (newData == NULL) {
-			return -1;
+			return parser_Error(parser, "memory");
 		}
 		s->data = newData;
 		s->data[s->length++] = c;
 	}
 
 	parser->value.s = s;
-	return 0;
+	return parser_Leave(parser);
 }
 
 static int ReadView(struct parser *parser)
@@ -764,6 +919,10 @@ static int ReadFor(struct parser *parser)
 	char var[MAX_WORD];
 	Instruction *from, *to, *in = NULL, *iter;
 
+	if (parser_Enter(parser, "for") < 0) {
+		return -1;
+	}
+
 	if (ReadWord(parser) < 0) {
 		return -1;
 	}
@@ -780,7 +939,7 @@ static int ReadFor(struct parser *parser)
 		}
 		from = union_Alloc(union_Default(), sizeof(*from));
 		if (from == NULL) {
-			return -1;
+			return parser_Error(parser, "memory");
 		}
 		*from = parser->instruction;
 		SkipSpace(parser);
@@ -793,26 +952,26 @@ static int ReadFor(struct parser *parser)
 		}
 		in = union_Alloc(union_Default(), sizeof(*in));
 		if (in == NULL) {
-			return -1;
+			return parser_Error(parser, "memory");
 		}
 		*in = parser->instruction;
 	} else if (strcmp(parser->word, "to") == 0) {
 		from = NULL;
 	} else {
-		return -1;
+		return parser_Error(parser, "expected from, in or to");
 	}
 	SkipSpace(parser);
 
 	if (in == NULL) {
 		if (strcmp(parser->word, "to") != 0) {
-			return -1;
+			return parser_Error(parser, "expected to");
 		}
 		if (ReadExpression(parser, 0) < 0) {
 			return -1;
 		}
 		to = union_Alloc(union_Default(), sizeof(*to));
 		if (to == NULL) {
-			return -1;
+			return parser_Error(parser, "memory");
 		}
 		*to = parser->instruction;
 		SkipSpace(parser);
@@ -823,7 +982,7 @@ static int ReadFor(struct parser *parser)
 	}
 	iter = union_Alloc(union_Default(), sizeof(*iter));
 	if (iter == NULL) {
-		return -1;
+		return parser_Error(parser, "memory");
 	}
 	*iter = parser->instruction;
 
@@ -839,7 +998,7 @@ static int ReadFor(struct parser *parser)
 		parser->instruction.forin.in = in;
 		parser->instruction.forin.iter = iter;
 	}
-	return 0;
+	return parser_Leave(parser);
 }
 
 /**
@@ -853,12 +1012,16 @@ static int ReadIf(struct parser *parser)
 	Instruction *cond;
 	Instruction *els = NULL;
 
+	if (parser_Enter(parser, "if") < 0) {
+		return -1;
+	}
+
 	if (ReadExpression(parser, 0) < 0) {
 		return -1;
 	}
 	cond = union_Alloc(union_Default(), sizeof(*cond));
 	if (cond == NULL) {
-		return -1;
+		return parser_Error(parser, "memory");
 	}
 	*cond = parser->instruction;
 
@@ -868,7 +1031,7 @@ static int ReadIf(struct parser *parser)
 	}
 	iff = union_Alloc(union_Default(), sizeof(*iff));
 	if (iff == NULL) {
-		return -1;
+		return parser_Error(parser, "memory");
 	}
 	*iff = parser->instruction;
 
@@ -883,7 +1046,7 @@ static int ReadIf(struct parser *parser)
 			els = union_Alloc(union_Default(),
 					sizeof(*els));
 			if (els == NULL) {
-				return -1;
+				return parser_Error(parser, "memory");
 			}
 			*els = parser->instruction;
 		}
@@ -892,7 +1055,7 @@ static int ReadIf(struct parser *parser)
 	parser->instruction.iff.condition = cond;
 	parser->instruction.iff.iff = iff;
 	parser->instruction.iff.els = els;
-	return 0;
+	return parser_Leave(parser);
 }
 
 static int ReadInvoke(struct parser *parser)
@@ -900,6 +1063,10 @@ static int ReadInvoke(struct parser *parser)
 	char name[256];
 	Instruction *args = NULL, *newArgs;
 	Uint32 numArgs = 0;
+
+	if (parser_Enter(parser, "invoke") < 0) {
+		return -1;
+	}
 
 	/* assuming that the caller got the invoke name already
 	 * and has skipped the '('
@@ -913,7 +1080,7 @@ static int ReadInvoke(struct parser *parser)
 		newArgs = union_Realloc(union_Default(), args,
 				sizeof(*args) * (numArgs + 1));
 		if (newArgs == NULL) {
-			return -1;
+			return parser_Error(parser, "memory");
 		}
 		args = newArgs;
 		args[numArgs++] = parser->instruction;
@@ -925,19 +1092,23 @@ static int ReadInvoke(struct parser *parser)
 		SkipSpace(parser);
 	}
 	if (parser->c != ')') {
-		return -1;
+		return parser_Error(parser, "expected , or )");
 	}
 	NextChar(parser); /* skip ')' */
 	strcpy(parser->instruction.invoke.name, name);
 	parser->instruction.instr = INSTR_INVOKE;
 	parser->instruction.invoke.args = args;
 	parser->instruction.invoke.numArgs = numArgs;
-	return 0;
+	return parser_Leave(parser);
 }
 
 static int ReadLocal(struct parser *parser)
 {
 	Instruction *pInstr;
+
+	if (parser_Enter(parser, "local") < 0) {
+		return -1;
+	}
 
 	if (ReadWord(parser) < 0) {
 		return -1;
@@ -945,7 +1116,7 @@ static int ReadLocal(struct parser *parser)
 	strcpy(parser->instruction.local.name, parser->word);
 	SkipSpace(parser);
 	if (parser->c != '=') {
-		return -1;
+		return parser_Error(parser, "expected =");
 	}
 	NextChar(parser); /* skip '=' */
 	SkipSpace(parser);
@@ -957,30 +1128,34 @@ static int ReadLocal(struct parser *parser)
 	}
 	pInstr = union_Alloc(union_Default(), sizeof(*pInstr));
 	if (pInstr == NULL) {
-		return -1;
+		return parser_Error(parser, "memory");
 	}
 	*pInstr = parser->instruction;
 	parser->instruction = instruction;
 	parser->instruction.instr = INSTR_LOCAL;
 	parser->instruction.local.value = pInstr;
-	return 0;
+	return parser_Leave(parser);
 }
 
 static int ReadReturn(struct parser *parser)
 {
 	Instruction *instr;
 
+	if (parser_Enter(parser, "return") < 0) {
+		return -1;
+	}
+
 	if (ReadExpression(parser, 0) < 0) {
 		return -1;
 	}
 	instr = union_Alloc(union_Default(), sizeof(*instr));
 	if (instr == NULL) {
-		return -1;
+		return parser_Error(parser, "memory");
 	}
 	*instr = parser->instruction;
 	parser->instruction.instr = INSTR_RETURN;
 	parser->instruction.ret.value = instr;
-	return 0;
+	return parser_Leave(parser);
 }
 
 static int ReadSwitch(struct parser *parser)
@@ -993,17 +1168,21 @@ static int ReadSwitch(struct parser *parser)
 	Uint32 *jumps = NULL, *newJumps;
 	Uint32 numJumps = 0;
 
+	if (parser_Enter(parser, "switch") < 0) {
+		return -1;
+	}
+
 	if (ReadExpression(parser, 0) < 0) {
 		return -1;
 	}
 	instr = union_Alloc(union_Default(), sizeof(*instr));
 	if (instr == NULL) {
-		return -1;
+		return parser_Error(parser, "memory");
 	}
 	*instr = parser->instruction;
 	SkipSpace(parser);
 	if (parser->c != '{') {
-		return -1;
+		return parser_Error(parser, "expected {");
 	}
 	NextChar(parser); /* skip '{' */
 	while (SkipSpace(parser), parser->c != '}') {
@@ -1021,7 +1200,7 @@ static int ReadSwitch(struct parser *parser)
 						sizeof(*conditions) *
 						(numJumps + 1));
 				if (newConditions == NULL) {
-					return -1;
+					return parser_Error(parser, "memory");
 				}
 				conditions = newConditions;
 
@@ -1029,7 +1208,7 @@ static int ReadSwitch(struct parser *parser)
 						sizeof(*jumps) *
 						(numJumps + 1));
 				if (newJumps == NULL) {
-					return -1;
+					return parser_Error(parser, "memory");
 				}
 				jumps = newJumps;
 
@@ -1045,7 +1224,7 @@ static int ReadSwitch(struct parser *parser)
 		newInstructions = union_Realloc(union_Default(), instructions,
 				sizeof(*instructions) * (numInstructions + 1));
 		if (newInstructions == NULL) {
-			return -1;
+			return parser_Error(parser, "memory");
 		}
 		instructions = newInstructions;
 		instructions[numInstructions++] = parser->instruction;
@@ -1059,7 +1238,7 @@ static int ReadSwitch(struct parser *parser)
 	parser->instruction.switchh.jumps = jumps;
 	parser->instruction.switchh.conditions = conditions;
 	parser->instruction.switchh.numJumps = numJumps;
-	return 0;
+	return parser_Leave(parser);
 }
 
 static int ReadThis(struct parser *parser)
@@ -1072,6 +1251,10 @@ static int ReadTrigger(struct parser *parser)
 {
 	Instruction *args;
 	Uint32 numArgs;
+
+	if (parser_Enter(parser, "trigger") < 0) {
+		return -1;
+	}
 
 	if (ReadWord(parser) < 0) {
 		return -1;
@@ -1090,7 +1273,7 @@ static int ReadTrigger(struct parser *parser)
 	strcpy(parser->instruction.trigger.name, parser->word);
 	parser->instruction.trigger.args = args;
 	parser->instruction.trigger.numArgs = numArgs;
-	return 0;
+	return parser_Leave(parser);
 }
 
 static int ReadWhile(struct parser *parser)
@@ -1098,12 +1281,16 @@ static int ReadWhile(struct parser *parser)
 	Instruction *cond;
 	Instruction *iter;
 
+	if (parser_Enter(parser, "while") < 0) {
+		return -1;
+	}
+
 	if (ReadExpression(parser, 0) < 0) {
 		return -1;
 	}
 	cond = union_Alloc(union_Default(), sizeof(*cond));
 	if (cond == NULL) {
-		return -1;
+		return parser_Error(parser, "memory");
 	}
 	*cond = parser->instruction;
 
@@ -1113,14 +1300,14 @@ static int ReadWhile(struct parser *parser)
 	}
 	iter = union_Alloc(union_Default(), sizeof(*iter));
 	if (iter == NULL) {
-		return -1;
+		return parser_Error(parser, "memory");
 	}
 	*iter = parser->instruction;
 
 	parser->instruction.instr = INSTR_WHILE;
 	parser->instruction.whilee.condition = cond;
 	parser->instruction.whilee.iter = iter;
-	return 0;
+	return parser_Leave(parser);
 }
 
 static int _ReadValue(struct parser *parser, type_t type)
@@ -1150,13 +1337,17 @@ static int ReadValue(struct parser *parser)
 	struct int_or_float iof;
 	type_t type;
 
+	if (parser_Enter(parser, "value") < 0) {
+		return -1;
+	}
+
 	if (isalpha(parser->c)) {
 		if (ReadWord(parser) < 0) {
 			return -1;
 		}
 		type = CheckType(parser);
 		if (type == TYPE_NULL) {
-			return -1;
+			return parser_Error(parser, "invalid type");
 		}
 	} else if (parser->c == '[') {
 		type = TYPE_ARRAY;
@@ -1538,6 +1729,10 @@ static int ReadExpression(struct parser *parser, int precedence)
 	char lh;
 	Instruction opr;
 
+	if (parser_Enter(parser, "expression") < 0) {
+		return -1;
+	}
+
 	for (Uint32 i = 0; i < ARRLEN(prefixes); i++) {
 		if (prefixes[i].ch == parser->c) {
 			NextChar(parser);
@@ -1556,7 +1751,7 @@ static int ReadExpression(struct parser *parser, int precedence)
 			instr.invoke.args = union_Alloc(union_Default(),
 					sizeof(*instr.invoke.args));
 			if (instr.invoke.args == NULL) {
-				return -1;
+				return parser_Error(parser, "memory");
 			}
 			instr.invoke.args[0] = parser->instruction;
 			instr.invoke.numArgs = 1;
@@ -1566,7 +1761,7 @@ static int ReadExpression(struct parser *parser, int precedence)
 
 	if (parser->c == '{') {
 		if (precedence != 0) {
-			return -1;
+			return parser_Error(parser, "invalid {");
 		}
 		if (ReadBody(parser) < 0) {
 			return -1;
@@ -1584,7 +1779,7 @@ static int ReadExpression(struct parser *parser, int precedence)
 		}
 		instr = parser->instruction;
 		if (parser->c != ')') {
-			return -1;
+			return parser_Error(parser, "expected )");
 		}
 		NextChar(parser); /* skip ')' */
 	} else if (parser->c == '[') {
@@ -1607,7 +1802,7 @@ static int ReadExpression(struct parser *parser, int precedence)
 		struct int_or_float iof;
 
 		if (ReadIntOrFloat(parser, &iof) < 0) {
-			return -1;
+			return parser_Error(parser, "expected expression");
 		}
 		iof_AsPrecise(&iof, &parser->value);
 		instr.instr = INSTR_VALUE;
@@ -1621,7 +1816,10 @@ static int ReadExpression(struct parser *parser, int precedence)
 		SkipSpace(parser);
 
 		if ((keyword = GetKeyword(parser->word)) != NULL) {
-			return keyword->read(parser);
+			if (keyword->read(parser) < 0) {
+				return -1;
+			}
+			return parser_Leave(parser);
 		} else if (parser->c == '(') {
 			NextChar(parser); /* skip '(' */
 			SkipSpace(parser);
@@ -1641,7 +1839,7 @@ static int ReadExpression(struct parser *parser, int precedence)
 				return -1;
 			}
 			if (ResolveConstant(parser) < 0) {
-				return -1;
+				return parser_Error(parser, "invalid constant");
 			}
 			instr.instr = INSTR_VALUE;
 			instr.value.value = parser->value;
@@ -1686,13 +1884,13 @@ next_infix:
 			opr.set.dest = union_Alloc(union_Default(),
 					sizeof(*opr.set.dest));
 			if (opr.set.dest == NULL) {
-				return -1;
+				return parser_Error(parser, "memory");
 			}
 			*opr.set.dest = instr;
 			opr.set.src = union_Alloc(union_Default(),
 					sizeof(*opr.set.src));
 			if (opr.set.src == NULL) {
-				return -1;
+				return parser_Error(parser, "memory");
 			}
 			NextChar(parser); /* skip '=' */
 			SkipSpace(parser);
@@ -1710,7 +1908,7 @@ next_infix:
 			from = union_Alloc(union_Default(),
 					sizeof(*from));
 			if (from == NULL) {
-				return -1;
+				return parser_Error(parser, "memory");
 			}
 			*from = instr;
 
@@ -1757,7 +1955,7 @@ next_infix:
 		opr.invoke.args = union_Alloc(union_Default(),
 				sizeof(*instr.invoke.args) * 2);
 		if (opr.invoke.args == NULL) {
-			return -1;
+			return parser_Error(parser, "memory");
 		}
 		opr.invoke.numArgs = 2;
 		opr.invoke.args[0] = instr;
@@ -1769,12 +1967,13 @@ next_infix:
 	}
 end:
 	parser->instruction = instr;
-	return 0;
+	return parser_Leave(parser);
 }
 
 static int ReadProperty(struct parser *parser)
 {
 	if (parser->c != ':') {
+		/* should never happen */
 		return -1;
 	}
 	NextChar(parser); /* skip ':' */
@@ -1784,7 +1983,7 @@ static int ReadProperty(struct parser *parser)
 	strcpy(parser->property.name, parser->word);
 	SkipSpace(parser);
 	if (parser->c != '=') {
-		return -1;
+		return parser_Error(parser, "expected =");
 	}
 	NextChar(parser); /* skip '=' */
 	SkipSpace(parser);
@@ -1795,16 +1994,16 @@ static int ReadProperty(struct parser *parser)
 	return 0;
 }
 
-static int wrapper_AddProperty(Union *uni, RawWrapper *wrapper,
+static int wrapper_AddProperty(struct parser *parser, RawWrapper *wrapper,
 		const RawProperty *property)
 {
 	RawProperty *newProperties;
 
-	newProperties = union_Realloc(uni, wrapper->properties,
+	newProperties = union_Realloc(&parser->uni, wrapper->properties,
 			sizeof(*wrapper->properties) *
 			(wrapper->numProperties + 1));
 	if (newProperties == NULL) {
-		return -1;
+		return parser_Error(parser, "memory");
 	}
 	wrapper->properties = newProperties;
 	wrapper->properties[wrapper->numProperties++] = *property;
@@ -1868,7 +2067,7 @@ int prop_ParseString(const char *str, Union *uni, RawWrapper **pWrappers,
 			if (ReadProperty(&parser) < 0) {
 				goto fail;
 			}
-			if (wrapper_AddProperty(&parser.uni,
+			if (wrapper_AddProperty(&parser,
 						&wrappers[numWrappers - 1],
 						&parser.property) < 0) {
 				goto fail;
@@ -1894,6 +2093,7 @@ int prop_ParseString(const char *str, Union *uni, RawWrapper **pWrappers,
 			newWrappers = union_Realloc(&parser.uni, wrappers,
 					sizeof(*wrappers) * (numWrappers + 1));
 			if (newWrappers == NULL) {
+				parser_Error(&parser, "memory");
 				goto fail;
 			}
 			wrappers = newWrappers;
@@ -1910,7 +2110,7 @@ int prop_ParseString(const char *str, Union *uni, RawWrapper **pWrappers,
 				goto fail;
 			}
 			parser.property.instruction = parser.instruction;
-			if (wrapper_AddProperty(&parser.uni,
+			if (wrapper_AddProperty(&parser,
 						&wrappers[0],
 						&parser.property) < 0) {
 				goto fail;
@@ -1928,7 +2128,7 @@ fail:
 	union_Trim(defUni, numPtrs);
 	fprintf(stderr, "parser error at line %ld\n> ", parser.line + 1);
 	if (parser.column > 0) {
-		for (int i = 0; i < parser.column - 1; i++) {
+		for (Uint32 i = 0; i < parser.column - 1; i++) {
 			fputc(parser.buffer[i], stderr);
 		}
 		fprintf(stderr, "\033[31m");
@@ -1984,14 +2184,19 @@ int prop_ParseFile(FILE *file, Union *uni, RawWrapper **pWrappers,
 	NextChar(&parser);
 
 	while (SkipSpace(&parser), parser.c != EOF) {
+		/* this is so there is no need to put parser_Leave(parser)
+		 * before every continue */
+		parser.numWhere = 0;
+
 		if (parser.c == ':') {
+			parser_Enter(&parser, "property");
 			if (numWrappers == 1) {
 				goto fail;
 			}
 			if (ReadProperty(&parser) < 0) {
 				goto fail;
 			}
-			if (wrapper_AddProperty(&parser.uni,
+			if (wrapper_AddProperty(&parser,
 						&wrappers[numWrappers - 1],
 						&parser.property) < 0) {
 				goto fail;
@@ -1999,10 +2204,13 @@ int prop_ParseFile(FILE *file, Union *uni, RawWrapper **pWrappers,
 			continue;
 		}
 
+		parser_Enter(&parser, "variable/label declaration");
+
 		if (ReadWord(&parser) < 0) {
 			goto fail;
 		}
 		if (GetKeyword(parser.word) != NULL) {
+			parser_Error(&parser, "expected variable/label name");
 			goto fail;
 		}
 		SkipSpace(&parser);
@@ -2017,6 +2225,7 @@ int prop_ParseFile(FILE *file, Union *uni, RawWrapper **pWrappers,
 			newWrappers = union_Realloc(&parser.uni, wrappers,
 					sizeof(*wrappers) * (numWrappers + 1));
 			if (newWrappers == NULL) {
+				parser_Error(&parser, "memory");
 				goto fail;
 			}
 			wrappers = newWrappers;
@@ -2033,12 +2242,15 @@ int prop_ParseFile(FILE *file, Union *uni, RawWrapper **pWrappers,
 				goto fail;
 			}
 			parser.property.instruction = parser.instruction;
-			if (wrapper_AddProperty(&parser.uni,
+			if (wrapper_AddProperty(&parser,
 						&wrappers[0],
 						&parser.property) < 0) {
 				goto fail;
 			}
 			continue;
+		} else {
+			parser_Error(&parser, "expected : or = after name");
+			goto fail;
 		}
 	}
 	*uni = parser.uni;
@@ -2050,50 +2262,67 @@ fail:
 	union_FreeAll(&parser.uni);
 	union_Trim(defUni, numPtrs);
 	fprintf(stderr, "parser error at line %ld\n> ", parser.line + 1);
-	Uint32 p = parser.iRead, i, n = 0;
-	for (i = 0; i < (Uint32) parser.column; i++) {
-		if (p == 0) {
-			p = sizeof(parser.buffer) - 1;
-		} else {
-			p--;
-		}
-		if (p == parser.iWrite) {
+	const struct last_action action = parser.lastAction;
+	Uint32 p = action.sol;
+	Uint32 numSpace = 0;
+	/* finding the beginning of the line */
+	bool allSpace = true;
+
+	while (isspace(parser.buffer[p])) {
+		if (numSpace == action.column) {
 			break;
 		}
-		n++;
-	}
-	for (i = 0; i < n; i++) {
-		if (!isspace(parser.buffer[p])) {
-			break;
-		}
+		numSpace++;
 		if (p == sizeof(parser.buffer) - 1) {
 			p = 0;
 		} else {
 			p++;
 		}
 	}
-	if (n > 0) {
-		for (i = 0; i < n - 1; i++) {
+	for (Uint32 i = 0; i < action.column - numSpace; i++) {
+		fputc(parser.buffer[p], stderr);
+		if (p == sizeof(parser.buffer) - 1) {
+			p = 0;
+		} else {
+			p++;
+		}
+	}
+	for (Uint32 i = 0; i < action.count; i++) {
+		if (!isspace(parser.buffer[(p + i) % sizeof(parser.buffer)])) {
+			allSpace = false;
+			break;
+		}
+	}
+	if (allSpace) {
+		fprintf(stderr, "\033[31m~\033[0m");
+	} else {
+		for (Uint32 i = 0; i < action.count; i++) {
+			fprintf(stderr, "\033[31m");
 			fputc(parser.buffer[p], stderr);
+			fprintf(stderr, "\033[0m");
 			if (p == sizeof(parser.buffer) - 1) {
 				p = 0;
 			} else {
 				p++;
 			}
 		}
-		fprintf(stderr, "\033[31m");
-		fputc(parser.buffer[p], stderr);
-		fprintf(stderr, "\033[0m");
-		NextChar(&parser);
 	}
-	for (i = 0; i < 20; i++) {
-		const int c = NextChar(&parser);
-		if (c == EOF || c == '\n') {
+	for (int i = 0; i < 20; i++) {
+		if (p == parser.iWrite) {
 			break;
 		}
-		fputc(c, stderr);
+		if (parser.buffer[p] == '\n') {
+			break;
+		}
+		fputc(parser.buffer[p], stderr);
+		if (p == sizeof(parser.buffer) - 1) {
+			p = 0;
+		} else {
+			p++;
+		}
 	}
 	fputc('\n', stderr);
+	parser_PrintError(&parser, stderr);
 	return -1;
 }
 
