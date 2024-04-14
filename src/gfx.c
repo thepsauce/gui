@@ -617,7 +617,8 @@ static struct word *CacheWord(const char *data)
 	font = &cached_fonts[cur_font];
 
 	newWords = union_Realloc(union_Default(), font->cachedWords,
-			sizeof(*newWords) * (font->numCachedWords + 1));
+			sizeof(*font->cachedWords) *
+			(font->numCachedWords + 1));
 	if (newWords == NULL) {
 		return NULL;
 	}

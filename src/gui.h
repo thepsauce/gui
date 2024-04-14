@@ -473,6 +473,9 @@ typedef struct label {
 	struct label *next;
 } Label;
 
+Uint32 utf8_Next(const char *str, Uint32 length, Uint32 index);
+Uint32 utf8_Prev(const char *str, Uint32 length, Uint32 index);
+int instruction_Execute(Instruction *instr, Value *value);
 int prop_ParseString(const char *str, Union *uni, RawWrapper **pWrappers,
 		Uint32 *pNumWrappers);
 int prop_ParseFile(FILE *file, Union *uni, RawWrapper **pWrappers,

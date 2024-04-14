@@ -6,193 +6,6 @@ Union environment_union = { .limit = SIZE_MAX };
 Label global_label = { .proc = BaseProc };
 View base_view = { .label = &global_label };
 
-struct term {
-	char **lines;
-	Uint32 numLines;
-	Uint32 capLines;
-	Uint32 line;
-	Uint32 column;
-	Uint32 lenLine;
-	Uint32 capLine;
-};
-
-static int term_NextLine(struct term *term)
-{
-	char **newLines;
-
-	newLines = union_Realloc(union_Default(), term->lines,
-			sizeof(*term->lines) * (term->numLines + 1));
-	if (newLines == NULL) {
-		return -1;
-	}
-	term->lines = newLines;
-	term->lines[term->numLines] = NULL;
-	term->line = term->numLines;
-	term->numLines++;
-	term->column = 0;
-	term->lenLine = 0;
-	term->capLine = 0;
-	return 0;
-}
-
-static int term_Append(struct term *term, const char *str, Uint32 lenStr)
-{
-	char *buf;
-
-	if (term->column + lenStr > term->capLine) {
-		term->capLine *= 2;
-		term->capLine += lenStr + 1;
-		buf = union_Realloc(union_Default(),
-				term->lines[term->line], term->capLine);
-		if (buf == NULL) {
-			return -1;
-		}
-		term->lines[term->line] = buf;
-	} else {
-		buf = term->lines[term->line];
-	}
-	memmove(&buf[term->column + lenStr], &buf[term->column],
-			term->lenLine - term->column);
-	memcpy(&buf[term->column], str, lenStr);
-	term->lenLine += lenStr;
-	term->column += lenStr;
-	buf[term->lenLine] = '\0';
-	return 0;
-}
-
-static void term_Delete(struct term *term, Uint32 from, Uint32 to)
-{
-	char *buf;
-
-	buf = term->lines[term->line];
-	memmove(&buf[from], &buf[to], term->lenLine - to);
-	term->lenLine -= to - from;
-	buf[term->lenLine] = '\0';
-}
-
-static int ExecuteInstruction(Instruction *instr, Value *value);
-
-Uint32 utf8_Next(const char *str, Uint32 length, Uint32 index)
-{
-	Uint32 n;
-
-	if (index != length) {
-		if (!(str[index] & 0x80)) {
-			return index + 1;
-		}
-		n = length - index;
-		while (index++, (--n) != 0) {
-			if ((str[index] & 0xc0) == 0x80) {
-				break;
-			}
-		}
-	}
-	return index;
-}
-
-Uint32 utf8_Prev(const char *str, Uint32 length, Uint32 index)
-{
-	(void) length;
-	while (index > 0 && (str[--index] & 0xc0) == 0x80) {
-		if (index > 0 && !(str[index - 1] & 0x80)) {
-			break;
-		}
-	}
-	return index;
-}
-
-int BaseProc(View *view, event_t type, EventInfo *info)
-{
-	static struct term term;
-
-	Rect r, ext;
-	Instruction *instr;
-	Uint32 index;
-	Value val;
-	int lineSkip;
-
-	(void) view;
-
-	if (term.lines == NULL) {
-		term.lines = union_Alloc(union_Default(),
-				sizeof(*term.lines));
-		term.lines[0] = NULL;
-		term.numLines = 1;
-	}
-
-	switch (type) {
-	case EVENT_PAINT:
-		renderer_SetDrawColor(0xffffffff);
-		r.x = 0;
-		r.y = 0;
-		lineSkip = renderer_LineSkip();
-		for (Uint32 i = 0; i < term.numLines; i++) {
-			if (term.lines[i] == NULL) {
-				r.y += lineSkip;
-				continue;
-			}
-			renderer_DrawText(term.lines[i],
-					strlen(term.lines[i]), &r);
-			r.y += lineSkip;
-		}
-		renderer_GetTextExtent(term.lines[term.line],
-				term.column, &ext);
-		ext.y = renderer_LineSkip() * term.line;
-		ext.w = 2;
-		renderer_FillRect(&ext);
-		break;
-
-	case EVENT_KEYDOWN:
-		switch (info->ki.sym.sym) {
-		case SDLK_LEFT:
-			term.column = utf8_Prev(term.lines[term.line],
-					term.lenLine, term.column);
-			break;
-		case SDLK_RIGHT:
-			term.column = utf8_Next(term.lines[term.line],
-					term.lenLine, term.column);
-			break;
-		case SDLK_HOME:
-			term.column = 0;
-			break;
-		case SDLK_END:
-			term.column = term.lenLine;
-			break;
-
-		case SDLK_BACKSPACE:
-			index = utf8_Prev(term.lines[term.line], term.lenLine,
-					term.column);
-			if (index != term.column) {
-				term_Delete(&term, index, term.column);
-				term.column = index;
-			}
-			break;
-		case SDLK_DELETE:
-			index = utf8_Next(term.lines[term.line], term.lenLine,
-					term.column);
-			if (index != term.column) {
-				term_Delete(&term, term.column, index);
-			}
-			break;
-		case SDLK_RETURN:
-			instr = parse_Expression(term.lines[term.line],
-					term.lenLine);
-			if (instr != NULL) {
-				ExecuteInstruction(instr, &val);
-			}
-			term_NextLine(&term);
-			break;
-		}
-		break;
-
-	case EVENT_TEXTINPUT:
-		term_Append(&term, info->ti.text, strlen(info->ti.text));
-		break;
-	default:
-	}
-	return 0;
-}
-
 View *view_Default(void)
 {
 	return &base_view;
@@ -262,6 +75,35 @@ static int ExecuteInstructions(Instruction *instrs,
 
 	}
 }*/
+
+Uint32 utf8_Next(const char *str, Uint32 length, Uint32 index)
+{
+	Uint32 n;
+
+	if (index != length) {
+		if (!(str[index] & 0x80)) {
+			return index + 1;
+		}
+		n = length - index;
+		while (index++, (--n) != 0) {
+			if ((str[index] & 0xc0) == 0x80) {
+				break;
+			}
+		}
+	}
+	return index;
+}
+
+Uint32 utf8_Prev(const char *str, Uint32 length, Uint32 index)
+{
+	(void) length;
+	while (index > 0 && (str[--index] & 0xc0) == 0x80) {
+		if (index > 0 && !(str[index - 1] & 0x80)) {
+			break;
+		}
+	}
+	return index;
+}
 
 static char *WordTerminate(struct value_string *s)
 {
@@ -758,8 +600,6 @@ static bool Equals(const Value *v1, const Value *v2)
 	return true;
 }
 
-static int ExecuteInstruction(Instruction *instr, Value *result);
-
 static int EvaluateInstruction(Instruction *instr, Value *result)
 {
 	Property *var;
@@ -778,7 +618,7 @@ static int EvaluateInstruction(Instruction *instr, Value *result)
 		return -1;
 	case INSTR_SET:
 	case INSTR_TRIGGER:
-		return ExecuteInstruction(instr, result);
+		return instruction_Execute(instr, result);
 	case INSTR_INVOKE:
 		var = SearchVariable(instr->invoke.name, NULL);
 		if (var == NULL || var->value.type != TYPE_FUNCTION) {
@@ -844,7 +684,7 @@ static int EvaluateInstruction(Instruction *instr, Value *result)
 	return 0;
 }
 
-static int ExecuteInstruction(Instruction *instr, Value *result)
+int instruction_Execute(Instruction *instr, Value *result)
 {
 	Property *var;
 	Value *pValue, val;
@@ -884,7 +724,7 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 		environment.stack[index].value.type = TYPE_INTEGER;
 		for (Sint64 i = from.i; i < to.i; i++) {
 			environment.stack[index].value.i = i;
-			const int r = ExecuteInstruction(instr->forr.iter,
+			const int r = instruction_Execute(instr->forr.iter,
 					result);
 			if (r == 2) {
 				environment.numStack = index;
@@ -913,7 +753,7 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 		if (in.type == TYPE_ARRAY) {
 			for (Sint64 i = 0; i < in.a->numValues; i++) {
 				environment.stack[index].value = in.a->values[i];
-				const int r = ExecuteInstruction(instr->forin.iter,
+				const int r = instruction_Execute(instr->forin.iter,
 						result);
 				if (r == 2) {
 					environment.numStack = index;
@@ -927,7 +767,7 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 			environment.stack[index].value.type = TYPE_INTEGER;
 			for (Sint64 i = 0; i < in.s->length; i++) {
 				environment.stack[index].value.i = in.s->data[i];
-				const int r = ExecuteInstruction(instr->forin.iter,
+				const int r = instruction_Execute(instr->forin.iter,
 						result);
 				if (r == 2) {
 					environment.numStack = index;
@@ -962,9 +802,9 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 			return -1;
 		}
 		if (b) {
-			return ExecuteInstruction(instr->iff.iff, result);
+			return instruction_Execute(instr->iff.iff, result);
 		} else if (instr->iff.els != NULL) {
-			return ExecuteInstruction(instr->iff.els, result);
+			return instruction_Execute(instr->iff.els, result);
 		}
 		break;
 
@@ -1061,7 +901,7 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 			}
 		}
 		for (; i < instr->switchh.numInstructions; i++) {
-			r = ExecuteInstruction(&instr->switchh.instructions[i],
+			r = instruction_Execute(&instr->switchh.instructions[i],
 					result);
 			if (r == 2) {
 				return 0;
@@ -1126,7 +966,7 @@ static int ExecuteInstruction(Instruction *instr, Value *result)
 			if (!b) {
 				break;
 			}
-			const int r = ExecuteInstruction(instr->whilee.iter, result);
+			const int r = instruction_Execute(instr->whilee.iter, result);
 			if (r == 2) {
 				return 0;
 			}
@@ -1143,7 +983,7 @@ static int ExecuteInstructions(Instruction *instrs,
 		Uint32 num, Value *result)
 {
 	for (Uint32 i = 0; i < num; i++) {
-		const int r = ExecuteInstruction(&instrs[i], result);
+		const int r = instruction_Execute(&instrs[i], result);
 		if (r != 0) {
 			return r;
 		}
